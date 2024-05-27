@@ -5,6 +5,10 @@ from .config import TOL
 
 
 def polyhedron_from_halfspaces(A, b):
+    """
+    This function finds the intersection of halfspaces defined by A * x <= b.
+    The algorithm is brute force, just to test the correctness of the intersection.
+    """
     # brute force
     N = A.shape[0]
     dim = A.shape[1]

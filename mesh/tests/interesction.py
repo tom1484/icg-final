@@ -3,6 +3,12 @@ import numpy as np
 from convex import polyhedron_from_halfspaces
 from space import KSimplexSpace, nd_rotation
 
+"""
+To find the intersection of two simplexes, we first find the intersection space of the
+two spaces that contain them. Then, we restrict the intersection space by the boundaries
+of the two simplexes.
+"""
+
 T1 = np.random.rand(4, 4)
 T2 = np.random.rand(4, 4)
 
@@ -32,9 +38,12 @@ T2 = np.random.rand(4, 4)
 
 S1 = KSimplexSpace(T1)
 S2 = KSimplexSpace(T2)
-
+# The intersection space of the two spaces
 Si = KSimplexSpace.space_intersect(S1, S2)
+
+# The dimension of the intersection space is one less than the dimension of the spaces
 if Si.k == Si.dim - 2:
+    # Find all constraints of the intersection space
     pA1, pb1 = S1.restrict_subspace(Si)
     pA2, pb2 = S2.restrict_subspace(Si)
 
@@ -42,6 +51,7 @@ if Si.k == Si.dim - 2:
     pb = np.vstack((pb1, pb2))
     # print(np.hstack((pA, pb)))
 
+    # Find the polyhedron by the constraints
     intersections_p = polyhedron_from_halfspaces(pA, pb)
     print(intersections_p.shape)
 

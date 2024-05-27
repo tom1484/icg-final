@@ -7,6 +7,15 @@ from .config import TOL
 
 
 class KSimplexSpace:
+    """
+    K-simplex is a convex hull of K + 1 points in R^N.
+    It can be represented by:
+    - vertices: T = O + [0, v1, v2, ..., vk], where O is the origin and vi are the basis vectors
+    - equations: A * x = b, where A = null(V).T, b = A * O
+
+    If the space is bounded, the orthogonal simplex containing the boundary points is also stored.
+    """
+
     def __init__(
         self,
         # given vertices
@@ -57,6 +66,10 @@ class KSimplexSpace:
 
     @staticmethod
     def vertices_to_eqation(T: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Convert vertices to equations according to the following formula:
+        A * x = b, where A = null(V).T, b = A * O
+        """
         V = T[:, 1:].T - T[:, 0].T
         A = la.null_space(V).T
         b = A @ T[:, 0]
@@ -65,6 +78,14 @@ class KSimplexSpace:
 
     @staticmethod
     def eqation_to_vertices(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """
+        Convert equations to vertices according to the following formula:
+        T = O + [0, V], where V = pinv(A) @ b
+
+        If the solution is invalid, return an empty array.
+        """
+        # I forgot what the following code does
+        # It checks if the solution is valid anyway
         LU_decomp = la.lu(A, permute_l=True)
         L, U = LU_decomp[0], LU_decomp[1]
 
@@ -85,14 +106,30 @@ class KSimplexSpace:
     def space_intersect(
         cls, S1: "KSimplexSpace", S2: "KSimplexSpace"
     ) -> "KSimplexSpace":
+        """
+        Find the intersection of two K-simplex spaces.
+        We assume that the two spaces are unbounded.
+
+        For example, if S1 and S2 are two 2-simplex spaces in R^3,
+        the intersection is a 1-simplex space in R^3, which is a line.
+        """
+        # The equations of the intersection are the combination of the equations of S1 and S2
         Ai = np.vstack((S1.A, S2.A))
         bi = np.vstack((S1.b, S2.b))
 
         return KSimplexSpace(A=Ai, b=bi, bounded=False)
 
     def construct_ortho_bounds(self) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """
+        Construct the orthogonal simplices containing exactly K boundary points.
+
+        For example, if the simplex is a 2-simplex (a triangle) in R^3,
+        the orthogonal simplices are 3 2-simplex spaces,
+        which are the orthogonal planes on the boundary edges of the triangle.
+        """
         bounds = []
 
+        # This function is only valid for K = N - 1
         if self.k != self.dim - 1:
             return bounds
 
@@ -113,6 +150,20 @@ class KSimplexSpace:
         return bounds
 
     def restrict_subspace(self, S: "KSimplexSpace") -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Construct the constraints of the subspace S by the boundaries of current simplex.
+
+        For example, given:
+        - current simplex: 2-simplex (a triangle) in R^3 defined by 3 vertices
+          (0, 0), (2, 0), (0, 2)
+        - subspace: a 1-simplex space (a line) in R^3 defined by one origin and one basis vector
+          O = (1, 0), v1 = (0, 1)
+        The subspace can written as O + a1 * v1 where a1 is a scalar.
+        Than the constraints calculated by this function are:
+        - -1 * a1 <= 0
+        - 1 * a1 <= 1
+        So pA = [1, 1].T, pb = [0, 1].T
+        """
         N = S.T.shape[1] - 1
 
         pA = np.zeros((self.k + 1, N))
