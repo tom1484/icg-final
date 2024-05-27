@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from scipy import linalg as la
 
-from config import TOL
+from .config import TOL
 
 
 class KSimplexSpace:
