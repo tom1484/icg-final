@@ -67,8 +67,8 @@ def generate_cuts(mesh, RM):
     for _, face in enumerate(mesh["faces"]):
         vertices = mesh["vertices"][face] @ RM.T
 
-        vertices0 = np.pad(vertices, ((0, 0), (0, 1)), constant_values=0)
-        vertices1 = np.pad(vertices, ((0, 0), (0, 1)), constant_values=1)
+        vertices0 = np.pad(vertices, ((0, 0), (0, 1)), constant_values=-0.1)
+        vertices1 = np.pad(vertices, ((0, 0), (0, 1)), constant_values=1.1)
 
         vertices = np.vstack((vertices0, vertices1))
         

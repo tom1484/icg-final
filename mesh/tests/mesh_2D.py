@@ -1,9 +1,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from mpl_toolkits import mplot3d
+from scipy import linalg as la
 
+from ..config import TOL
 from ..convex import polyhedron_from_halfspaces
+from ..mesh import Mesh, split_hyperface
 from ..space import KSimplexSpace, nd_rotation
+
+import tqdm
 
 
 def init_sculpt():
@@ -18,106 +22,162 @@ def init_sculpt():
             [1.0, 0.0, 1.0],
             [0.0, 1.0, 1.0],
             [1.0, 1.0, 1.0],
-        ]
+        ],
+        dtype=np.float64,
     )
 
     pattern = np.array(
         [
             [0, 1, 3],
             [0, 2, 3],
-        ]
+        ],
+        dtype=np.int32,
     )
 
-    tetrahedrons_id = np.ndarray((0, 3), dtype=int)
+    hyperfaces = np.ndarray((0, 3), dtype=int)
+    face_normals = []
     for i in range(3):
         base = 2**i
         mod_pattern = pattern % base
         new_pattern = (pattern - mod_pattern) * 2 + mod_pattern
+        new_faces = np.vstack((new_pattern, new_pattern + base))
 
-        tetrahedrons_id = np.vstack((tetrahedrons_id, new_pattern))
-        tetrahedrons_id = np.vstack((tetrahedrons_id, new_pattern + base))
+        for new_face in new_faces:
+            face_vertices = vertices[new_face]
+            norm = la.null_space(
+                np.vstack(
+                    (
+                        face_vertices[2] - face_vertices[0],
+                        face_vertices[1] - face_vertices[0],
+                    )
+                )
+            ).T[0]
+            # cross /= np.sqrt(np.sum(np.square(cross)))
 
-    return {
-        "vertices": vertices,
-        "tetrahedrons_id": tetrahedrons_id,
-    }
+            # determine direction
+            from_center = face_vertices[0] - 0.5
+            norm *= np.sign(np.dot(from_center, norm))
 
+            face_normals.append(norm)
 
-def get_sculpt_tetrahedron(sculpt, index):
-    tetrahedrons_id = sculpt["tetrahedrons_id"]
-    return sculpt["vertices"][tetrahedrons_id[index]].T
+        hyperfaces = np.vstack((hyperfaces, new_faces))
+
+    return Mesh(vertices, hyperfaces, np.array(face_normals))
 
 
 sculpt = init_sculpt()
-# print(sculpt["tetrahedrons_id"])
 
 
-def generate_cuts(mesh, RM):
-    cuts = []
-    # pattern = np.array([[0, 1, 2, 3], [3, 4, 5, 1], [1, 2, 3, 5]])
+def generate_cuts(mesh: Mesh, RM: np.ndarray, axis):
+    hyperfaces = []
+    face_normals = []
     patterns = np.array([[0, 1, 2], [1, 2, 3]])
 
-    for _, face in enumerate(mesh["faces"]):
-        vertices = mesh["vertices"][face] @ RM.T
+    vertices = (mesh.vertices - 0.5) @ RM.T + 0.5
+    edges = mesh.hyperfaces
 
-        vertices0 = np.pad(vertices, ((0, 0), (0, 1)), constant_values=0)
-        vertices1 = np.pad(vertices, ((0, 0), (0, 1)), constant_values=1)
+    plane0 = np.hstack(
+        (
+            vertices[:, :axis],
+            np.zeros((vertices.shape[0], 1)),
+            vertices[:, axis:],
+        )
+    )
+    plane1 = plane0.copy()
 
-        vertices = np.vstack((vertices0, vertices1))
+    plane0[:, axis] = -0.2
+    plane1[:, axis] = 1.2
+
+    num_verts = vertices.shape[0]
+    vertices = np.vstack((plane0, plane1))
+
+    for edge_id, vert_ids in enumerate(edges):
+        vert_ids = np.hstack((vert_ids, vert_ids + num_verts))
+        hyperface = vert_ids[patterns[0]]
 
         for pattern in patterns:
-            tetrahedron = vertices[pattern].T
-            cuts.append(tetrahedron)
+            hyperface = vert_ids[pattern]
+            hyperfaces.append(hyperface)
 
-    return cuts
+            face_normal = mesh.face_normals[edge_id]
+            norm = np.hstack((face_normal[:axis], 0, face_normal[axis:]))
+            face_normals.append(norm)
+
+    return Mesh(vertices, np.array(hyperfaces), np.array(face_normals))
 
 
-# TODO: Revert the mesh for cutting
-mesh = {
-    "vertices": np.array(
+mesh = Mesh(
+    np.array(
         [
+            # [0.2, 0.2],
+            # [0.8, 0.2],
+            # [0.2, 0.8],
+            # [0.8, 0.8],
             [0.2, 0.2],
-            [0.8, 0.2],
-            [0.2, 0.8],
+            [0.7, 0.2],
+            [0.2, 0.7],
             [0.8, 0.8],
-        ]
+            [0.3, 0.8],
+            [0.8, 0.3],
+        ],
+        dtype=np.float64,
     ),
-    "faces": np.array(
+    np.array(
         [
+            # [0, 1],
+            # [0, 2],
+            # [1, 3],
+            # [2, 3],
             [0, 1],
-            [0, 2],
-            [1, 3],
-            [2, 3],
-        ]
+            [1, 2],
+            [2, 0],
+            [3, 4],
+            [4, 5],
+            [5, 3],
+        ],
+        dtype=np.int32,
     ),
-}
-# RM = nd_rotation(0.7, 2, 0, 1)
-RM = np.identity(2)
+    np.array(
+        [
+            [0, -1],
+            [1, 1],
+            [-1, 0],
+            [0, 1],
+            [-1, -1],
+            [1, 0],
+        ],
+        dtype=np.float64,
+    ),
+)
+RM = nd_rotation(0.7, 2, 0, 1)
+# RM = np.identity(2)
 
-cuts = generate_cuts(mesh, RM)
+cuts0 = generate_cuts(mesh, RM, 0)
+cuts1 = generate_cuts(mesh, RM, 1)
 
 
-# Display
-fig = plt.figure()
-ax = plt.axes(projection="3d")
+def project_norm_to_hyperface(norm: np.ndarray, hyperface: np.ndarray):
+    proj = norm - np.dot(norm, hyperface) * hyperface / np.dot(hyperface, hyperface)
+    return proj / np.linalg.norm(proj)
 
-for cut in cuts:
-    cut = np.hstack((cut, cut[:, 0:1]))
-    ax.plot(cut[0], cut[1], cut[2], color="green")
 
-for j in range(len(sculpt["tetrahedrons_id"])):
-    T = get_sculpt_tetrahedron(sculpt, j)
-    tetrahedron = np.hstack((T, T[:, 0:1]))
-    ax.plot(tetrahedron[0], tetrahedron[1], tetrahedron[2], color="blue")
+def perform_cut(cuts, sculpt):
+    new_vertices = np.empty((0, 3))
+    # hole's (boundary points, edges, edge directions)
+    sculpt_face_holes = [[np.empty((0, 3)), [], []] for _ in range(sculpt.num_faces)]
+    cuts_face_holes = [[np.empty((0, 3)), [], []] for _ in range(cuts.num_faces)]
 
-for T in cuts:
-    S = KSimplexSpace(T)
+    for cut_idx in range(cuts.num_faces):
+        T = cuts.get_hyperface(cut_idx)
+        S = KSimplexSpace(T)
 
-    for j in range(len(sculpt["tetrahedrons_id"])):
-        ST = KSimplexSpace(get_sculpt_tetrahedron(sculpt, j))
-        Si = KSimplexSpace.space_intersect(S, ST)
+        for sculpt_idx in range(sculpt.num_faces):
+            ST = KSimplexSpace(sculpt.get_hyperface(sculpt_idx))
+            Si = KSimplexSpace.space_intersect(S, ST)
 
-        if Si.k == Si.dim - 2:
+            if Si.k < Si.dim - 2:
+                continue
+
             pA1, pb1 = S.restrict_subspace(Si)
             pA2, pb2 = ST.restrict_subspace(Si)
 
@@ -126,15 +186,132 @@ for T in cuts:
 
             intersections_p = polyhedron_from_halfspaces(pA, pb)
 
-            if intersections_p.shape[0] > 0:
-                intersections = Si.O + Si.V @ intersections_p
-                # print(ST.T)
-                print(intersections)
-                # ax.scatter(
-                #     intersections[0], intersections[1], intersections[2], color="red"
-                # )
+            # Non-paralell case
+            if intersections_p.T.shape[0] > 1:
+                if Si.k == Si.dim - 2:
+                    intersections = (Si.O + Si.V @ intersections_p).T
+                    # Add vertices to holes on faces
+                    # len_new = len(new_vertices)
+                    new_vertices = np.vstack((new_vertices, intersections))
 
-            # TODO: Create new faces from intersections
+                    cut_norm = cuts.face_normals[cut_idx]
+                    sculpt_norm = sculpt.face_normals[sculpt_idx]
+
+                    cuts_faces_hole = cuts_face_holes[cut_idx]
+                    cuts_faces_hole[0] = np.vstack((cuts_faces_hole[0], intersections))
+                    edge = list(
+                        range(
+                            cuts_faces_hole[0].shape[0] - intersections.shape[0],
+                            cuts_faces_hole[0].shape[0],
+                        )
+                    )
+                    cuts_faces_hole[1].append(edge)
+                    cuts_faces_hole[2].append(
+                        -project_norm_to_hyperface(sculpt_norm, cut_norm)
+                    )
+
+                    sculpt_faces_hole = sculpt_face_holes[sculpt_idx]
+                    sculpt_faces_hole[0] = np.vstack((sculpt_faces_hole[0], intersections))
+                    edge = list(
+                        range(
+                            sculpt_faces_hole[0].shape[0] - intersections.shape[0],
+                            sculpt_faces_hole[0].shape[0],
+                        )
+                    )
+                    sculpt_faces_hole[1].append(edge)
+                    sculpt_faces_hole[2].append(
+                        -project_norm_to_hyperface(cut_norm, sculpt_norm)
+                    )
+
+                # Paralell case
+                else:
+                    pass
 
 
-# plt.show()
+    all_vertices = np.vstack((sculpt.vertices, cuts.vertices))
+    sculpt_hyperfaces = sculpt.hyperfaces
+    cuts_hyperfaces = cuts.hyperfaces + sculpt.num_verts
+
+    new_vertices = np.empty((0, 3), dtype=np.float64)
+    new_hyperfaces = np.empty((0, 3), dtype=np.int32)
+    new_normals = np.empty((0, 3), dtype=np.float64)
+
+    for i in range(cuts.num_faces):
+    # for i in tqdm.tqdm(range(cuts.num_faces)):
+        h_vertices = cuts_face_holes[i][0]
+        h_faces = np.array(cuts_face_holes[i][1])
+        h_normals = np.array(cuts_face_holes[i][2])
+
+        if h_vertices.shape[0] == 0:
+            continue
+
+        hyperface = cuts_hyperfaces[i]
+
+        new_verts, new_hfs = split_hyperface(
+            all_vertices, hyperface, (h_vertices, h_faces, h_normals)
+        )
+        new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
+        all_vertices = np.vstack((all_vertices, new_verts))
+        new_normals = np.vstack(
+            (new_normals, np.repeat(cuts.face_normals[i : i + 1], new_hfs.shape[0], axis=0))
+        )
+
+    for i in range(sculpt.num_faces):
+    # for i in tqdm.tqdm(range(sculpt.num_faces)):
+        h_vertices = sculpt_face_holes[i][0]
+        h_faces = np.array(sculpt_face_holes[i][1])
+        h_normals = np.array(sculpt_face_holes[i][2])
+
+        if h_vertices.shape[0] == 0:
+            continue
+
+        hyperface = sculpt_hyperfaces[i]
+
+        new_verts, new_hfs = split_hyperface(
+            all_vertices, hyperface, (h_vertices, h_faces, h_normals)
+        )
+        new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
+        all_vertices = np.vstack((all_vertices, new_verts))
+        new_normals = np.vstack(
+            (
+                new_normals,
+                np.repeat(sculpt.face_normals[i : i + 1], new_hfs.shape[0], axis=0),
+            )
+        )
+
+
+    return Mesh(all_vertices, new_hyperfaces, new_normals)
+
+
+sculpt0 = perform_cut(cuts0, sculpt)
+sculpt1 = perform_cut(cuts1, sculpt0)
+
+# Display
+fig = plt.figure()
+ax = plt.axes(projection="3d")
+
+
+def plot_3D_mesh(mesh: Mesh, color="blue"):
+    for idx in range(mesh.num_faces):
+        verts = mesh.get_hyperface(idx)
+        verts = np.hstack((verts, verts[:, 0:1]))
+        ax.plot(verts[0], verts[1], verts[2], color=color)
+
+
+# plot_3D_mesh(sculpt, color="blue")
+# plot_3D_mesh(cuts0, color="green")
+
+plot_3D_mesh(sculpt0, color="red")
+plot_3D_mesh(cuts1, color="green")
+# sculpt.to_wavefront("mesh/result/yee.obj")
+# cuts.to_wavefront("mesh/result/cuts.obj")
+
+# for edge in new_hyperfaces:
+#     h_verts = all_vertices[edge]
+#     h_verts = np.vstack((h_verts, h_verts[0:1]))
+#     ax.plot(h_verts[:, 0], h_verts[:, 1], h_verts[:, 2], color="red")
+
+ax.set_xlim([-0.2, 1.2])
+ax.set_ylim([-0.2, 1.2])
+ax.set_zlim([-0.2, 1.2])
+plt.show()
