@@ -18,7 +18,9 @@ class Mesh:
         self.hyperfaces = hyperfaces
 
         assert self.vertices.shape[1] == self.hyperfaces.shape[1]
-        assert np.max(self.hyperfaces.flatten()) < self.vertices.shape[0]
+        # if not empty
+        if self.hyperfaces.shape[0] > 0:
+            assert np.max(self.hyperfaces.flatten()) < self.vertices.shape[0]
 
         self.num_verts = self.vertices.shape[0]
         self.num_faces = self.hyperfaces.shape[0]
@@ -52,6 +54,17 @@ class Mesh:
                 f.write("vn " + " ".join(map(str, norm)) + "\n")
 
             for face_id, face in enumerate(self.hyperfaces):
+                vn_str = "//" + str(face_id + 1)
+                f.write(
+                    "f " + " ".join(map(lambda x: str(x + 1) + vn_str, face)) + "\n"
+                )
+
+    def reorder_faces(self):
+        if self.vertices.shape[1] != 3:
+            return
+
+        for face_id, face in enumerate(self.hyperfaces):
+            for face_id, face in enumerate(self.hyperfaces):
                 # check triangle direction
                 face_vertices = self.vertices[face]
                 face_normals = self.face_normals[face_id]
@@ -61,12 +74,7 @@ class Mesh:
                 )
 
                 if np.dot(norm, face_normals) < 0:
-                    face = face[::-1]
-
-                vn_str = "//" + str(face_id + 1)
-                f.write(
-                    "f " + " ".join(map(lambda x: str(x + 1) + vn_str, face)) + "\n"
-                )
+                    self.hyperfaces[face_id] = face[::-1]
 
     def get_hyperface(self, face_index: int):
         return self.vertices[self.hyperfaces[face_index]].T
@@ -325,15 +333,15 @@ def split_hyperface(
                 if bf_bv_group == g:
                     new_cut_edge.append(bv_vertice_ids[bf_vert_ids[bv_idx]])
 
-            # if len(new_cut_edge) > 0:
+            if len(new_cut_edge) > 0:
             # WARNING: Just a hot fix
-            if len(new_cut_edge) == 2:
+            # if len(new_cut_edge) == 2:
                 edges = np.vstack((edges, new_cut_edge))
                 edge_norms = np.vstack((edge_norms, bf_norm))
 
     # TODO: Split groups again
     cut_edges_groups = generate_cut_groups(vertices, edges)
-    print(cut_edges_groups)
+    # print(cut_edges_groups)
 
     new_vertices = np.empty((0, 2), dtype=float)
     new_hyperfaces = np.empty((0, 3), dtype=int)
@@ -359,8 +367,8 @@ def split_hyperface(
         group_edges = map_to_new(cut_edges)
 
         # WARNING: Just a hot fix
-        if group_vertices.shape[0] < 3:
-            continue
+        # if group_vertices.shape[0] < 3:
+        #     continue
 
         info = triangle.MeshInfo()
         info.set_points(group_vertices)
@@ -371,8 +379,8 @@ def split_hyperface(
         group_triangles = np.array(tri.elements)
 
         # WARNING: Just a hot fix
-        if group_vertices.shape[0] == 0:
-            continue
+        # if group_vertices.shape[0] == 0:
+        #     continue
 
         num_new_vertices = new_vertices.shape[0]
         group_triangles += num_new_vertices
