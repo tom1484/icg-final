@@ -11,7 +11,7 @@ def getShape2d(type, size=100, imgSize=200, skeleton=False):
     if type == 0:
         # rectangle
         shape = np.zeros((size, size))
-        border = int(size * 0.2)
+        border = 0
         border2 = border + 2
         shape[border : size - border, border : size - border] = 255
         if skeleton:
@@ -23,7 +23,7 @@ def getShape2d(type, size=100, imgSize=200, skeleton=False):
         X, Y = np.meshgrid(x, y)
         X = X - size / 2
         Y = Y - size / 2
-        radius = size * 0.3
+        radius = size * 0.5
         radius2 = radius - 2
         shape = (X**2 + Y**2) < (radius**2)
         if skeleton:
@@ -53,10 +53,13 @@ def crop2dfrom3d(cube, shape, apply_dim):
 
 
 def getView2dfrom3d(cube, yaw, pitch, roll):
-    # rotate cube
-    cube = scipy.ndimage.rotate(cube, yaw, axes=(1, 2), reshape=False)
-    cube = scipy.ndimage.rotate(cube, pitch, axes=(0, 2), reshape=False)
-    cube = scipy.ndimage.rotate(cube, roll, axes=(0, 1), reshape=False)
+    # # rotate cube
+    # cube = scipy.ndimage.rotate(cube, yaw, axes=(1, 2), reshape=False)
+    # cube = scipy.ndimage.rotate(cube, pitch, axes=(0, 2), reshape=False)
+    # cube = scipy.ndimage.rotate(cube, roll, axes=(0, 1), reshape=False)
+    cube = myRotate(cube, yaw, axes=(1, 2))
+    cube = myRotate(cube, pitch, axes=(0, 2))
+    cube = myRotate(cube, roll, axes=(0, 1))
     # get view
     view = np.max(cube, axis=0)
     return view
@@ -64,7 +67,10 @@ def getView2dfrom3d(cube, yaw, pitch, roll):
 
 def getSettingList2D():
     setting_list = []
-    for angle in range(0, 360, 10):
+    for angle in range(0, 90, 10):
+        setting_list.append((angle, angle, angle))
+    setting_list.append((90, 90, 90))
+    for angle in range(90, 180, 10):
         setting_list.append((angle, angle, angle))
     return setting_list
 
@@ -81,10 +87,35 @@ def record2DVideo(cube, setting_list, path_name, fps=10):
         path_name, save_all=True, append_images=frames, loop=0, duration=1000 / fps
     )
 
+    return frames
+
+def myRotate(model, angle, axes=(0,1)):
+    angle = np.radians(angle)
+    matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    X, Y = np.meshgrid(np.arange(model.shape[axes[1]]), np.arange(model.shape[axes[0]]))
+    X = X - model.shape[axes[1]] // 2
+    Y = Y - model.shape[axes[0]] // 2
+
+    target_axis = np.stack([X, Y], axis=-1)
+    inverse_axis = np.linalg.inv(matrix)
+    index_axis = target_axis @ inverse_axis
+    index_X, index_Y = index_axis[:, :, 0], index_axis[:, :, 1]
+    index_X = index_X + model.shape[axes[1]] // 2
+    index_Y = index_Y + model.shape[axes[0]] // 2
+    index_X = np.clip(index_X, 0, model.shape[axes[1]] - 1)
+    index_Y = np.clip(index_Y, 0, model.shape[axes[0]] - 1)
+    index_X = index_X.astype(np.int64)
+    index_Y = index_Y.astype(np.int64)
+
+    shift_model = np.moveaxis(model, axes, (0, 1))
+    result = shift_model[index_Y, index_X]
+    result = np.moveaxis(result, (0, 1), axes)
+    return result
 
 if __name__ == "__main__":
-    size = 80
-    imgSize = 100
+    size = 40
+    imgSize = 80
+    # 50, 80 | 80, 100
     b_r = int((imgSize - size) / 2)
     cube = np.zeros((imgSize, imgSize, imgSize))
     # cube = np.ones((size, size, size)) * 255
@@ -105,4 +136,4 @@ if __name__ == "__main__":
     cv2.imwrite("view3.png", view3)
 
     setting_list = getSettingList2D()
-    record2DVideo(cube, setting_list, "./output/2d/2d_test.gif")
+    record2DVideo(cube, setting_list, "./output/2d/2d_50.gif")
