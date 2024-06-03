@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, List
 
 import meshpy.triangle as triangle
 import numpy as np
@@ -78,6 +78,67 @@ class Mesh:
 
     def get_hyperface(self, face_index: int):
         return self.vertices[self.hyperfaces[face_index]].T
+    
+    def nd_rotation(self, t: float, dim: int, ax1: int, ax2: int) -> np.ndarray:
+        RM = np.eye(dim)
+        cos = np.cos(t)
+        sin = (-1) ** (ax1 + ax2) * np.sin(t)
+        RM[ax1, ax1] = cos
+        RM[ax1, ax2] = -sin
+        RM[ax2, ax1] = sin
+        RM[ax2, ax2] = cos
+
+        return RM
+
+    def project3dfrom4d(self, rotation_list: List[Tuple[float, int, int]], center: np.ndarray = np.array([0.5, 0.5, 0.5, 0.5])):
+        """
+        rotation_list: [(angle, axis0, axis1), ...]
+        """
+        assert self.vertices.shape[1] == 4
+
+        rotate_matrix = np.eye(4)
+        # shift to center
+        new_vertices = self.vertices - center
+
+        for rotation in rotation_list:
+            angle, axis0, axis1 = rotation
+            rotate_matrix = rotate_matrix @ self.nd_rotation(angle, 4, axis0, axis1)
+        
+        new_vertices = new_vertices @ rotate_matrix.T
+        new_vertices = new_vertices[:, :3]
+
+        # shift back
+        new_vertices += center[:3]
+
+        # TODO: Update Face Normal
+        hyperfaces = np.ndarray((0, 3), dtype=int)
+        face_normals = np.ndarray((0, 3), dtype=float)
+        patterns = [
+            [0,1,2],
+            [0,1,3],
+            [0,2,3],
+            [1,2,3]
+        ]
+        for face in self.hyperfaces:
+            for pattern in patterns:
+                new_face = face[pattern]
+                face_vertices = new_vertices[new_face]
+                norm = la.null_space(
+                    np.vstack(
+                        (
+                            face_vertices[2] - face_vertices[0],
+                            face_vertices[1] - face_vertices[0],
+                        )
+                    )
+                ).T[0]
+                face_normals = np.vstack((face_normals, norm))
+                hyperfaces = np.vstack((hyperfaces, new_face))
+
+        # breakpoint()
+        return Mesh(new_vertices, hyperfaces, face_normals)
+
+
+
 
 
 def split_hyperface(
