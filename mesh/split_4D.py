@@ -6,37 +6,57 @@ from matplotlib import pyplot as plt
 from scipy import linalg as la
 
 from .config import TOL
+from .triangle import tetrahedralize, triangulate
 
 
 def plot(ax, hyperface_vertices, h_vertices, h_edges):
-    hyperface_vertices = np.vstack((hyperface_vertices, hyperface_vertices[:1]))
-    ax.plot(
-        hyperface_vertices[:, 0],
-        hyperface_vertices[:, 1],
-        np.zeros(hyperface_vertices.shape[0]),
-        color="red",
-    )
+    for i in range(hyperface_vertices.shape[0]):
+        for j in range(i + 1, hyperface_vertices.shape[0]):
+            ax.plot(
+                [hyperface_vertices[i, 0], hyperface_vertices[j, 0]],
+                [hyperface_vertices[i, 1], hyperface_vertices[j, 1]],
+                [hyperface_vertices[i, 2], hyperface_vertices[j, 2]],
+                color="black",
+            )
 
     for edge in h_edges:
         edge_verts = h_vertices[edge]
         # edge_verts = np.vstack((edge_verts, edge_verts[:1]))
-        ax.plot(
-            edge_verts[:, 0],
-            edge_verts[:, 1],
-            np.zeros(edge_verts.shape[0]),
-            color="blue",
-        )
+        for i in range(edge_verts.shape[0]):
+            for j in range(i + 1, edge_verts.shape[0]):
+                ax.plot(
+                    [edge_verts[i, 0], edge_verts[j, 0]],
+                    [edge_verts[i, 1], edge_verts[j, 1]],
+                    [edge_verts[i, 2], edge_verts[j, 2]],
+                    color="red",
+                )
 
     ax.plot(
         h_vertices[:, 0],
         h_vertices[:, 1],
-        np.zeros(h_vertices.shape[0]),
+        h_vertices[:, 2],
         "o",
         color="blue",
     )
 
 
-def split_hyperface(
+def plot_2D_polygon(ax, vertices, segs, color="blue"):
+    # verts = np.vstack((vertices, vertices[0:1]))
+    # ax.plot(verts[:, 0], verts[:, 1], color=color)
+    for seg in segs:
+        verts = vertices[seg]
+        ax.plot(verts[:, 0], verts[:, 1], color=color)
+
+
+def plot_3D_polygon(ax, vertices, segs, color="blue"):
+    # verts = np.vstack((vertices, vertices[0:1]))
+    # ax.plot(verts[:, 0], verts[:, 1], color=color)
+    for seg in segs:
+        verts = vertices[seg]
+        ax.plot(verts[:, 0], verts[:, 1], verts[:, 2], color=color)
+
+
+def split_4D_hyperface(
     ax,
     mesh_vertices: np.ndarray,
     hyperface: np.ndarray,
@@ -79,17 +99,11 @@ def split_hyperface(
         is_zero = np.all(np.abs(edge_vertices) < TOL, axis=0)
         one_sum = np.abs(np.sum(edge_vertices, axis=1) - 1) < TOL
         edges_to_remove[i] = np.all(np.logical_or(np.any(is_zero), np.all(one_sum)))
-        # print(edge_vertices)
-        # print(is_zero)
-        # print(one_sum)
 
     edges = edges[~edges_to_remove]
     edge_norms = edge_norms[~edges_to_remove]
 
     cut_edges_groups = generate_cut_groups(vertices, edges)
-
-    # print(vertices)
-    # print(edge_norms)
 
     ##############################################
     # Find connectable meshes
@@ -137,10 +151,8 @@ def split_hyperface(
 
             # print(cut_vert_on_seg)
 
+            # NOTE: Test
             cut_vert_on_seg = sorted(cut_vert_on_seg, key=lambda x: x[0])
-            # print(bfvi, bfvj)
-            # print(cut_vert_on_seg)
-            # print()
             to_remove = [False for _ in range(len(cut_vert_on_seg))]
             for i, (pos, dir, cut_idx, vertex_idx) in enumerate(cut_vert_on_seg[:-1]):
                 next_pos, next_dir, next_cut_idx, next_vertex_idx = cut_vert_on_seg[
@@ -148,8 +160,11 @@ def split_hyperface(
                 ]
                 # Exactly on the same position
                 if vertex_idx == next_vertex_idx:
-                    to_remove[i] = True
-                    to_remove[i + 1] = True
+                    if dir != next_dir:
+                        to_remove[i] = True
+                        to_remove[i + 1] = True
+                    else:
+                        to_remove[i] = True
                     continue
 
                 if dir == 1 and next_dir == -1:
@@ -157,20 +172,20 @@ def split_hyperface(
                         next_cut_idx,
                         next_vertex_idx,
                     )
-                    cut_hfe_neighbors[cut_idx][bfvj][bfvi] = (
-                        next_cut_idx,
-                        next_vertex_idx,
-                    )
+                    # cut_hfe_neighbors[cut_idx][bfvj][bfvi] = (
+                    #     next_cut_idx,
+                    #     next_vertex_idx,
+                    # )
 
                     if cut_idx == next_cut_idx:
                         to_remove[i] = True
                         to_remove[i + 1] = True
                         continue
 
-                    cut_hfe_neighbors[next_cut_idx][bfvi][bfvj] = (
-                        cut_idx,
-                        vertex_idx,
-                    )
+                    # cut_hfe_neighbors[next_cut_idx][bfvi][bfvj] = (
+                    #     cut_idx,
+                    #     vertex_idx,
+                    # )
                     cut_hfe_neighbors[next_cut_idx][bfvj][bfvi] = (
                         cut_idx,
                         vertex_idx,
@@ -197,18 +212,22 @@ def split_hyperface(
                     cut_vert_on_seg[-1][3],
                 )
 
-    bv_isolated = [
-        all([neighbor is None or neighbor[0] < 0 for neighbor in neighbors])
-        for neighbors in hf_verts_neighbors
-    ]
-    # print(bv_isolated)
+    # print(vertices)
+    # print(edges)
+    # print(edge_norms)
+    #
+    # print(cut_hfe_neighbors)
+    # print(hf_verts_neighbors)
+    #
+    # plot(ax, hyperface_vertices, vertices, edges)
 
-    num_valid_bv = 0
-    bv_vertice_ids = [-1 for _ in range(len(hyperface_vertices))]
-    for bfvi in range(len(hyperface_vertices)):
-        if not bv_isolated[bfvi]:
-            bv_vertice_ids[bfvi] = vertices.shape[0] + num_valid_bv
-            num_valid_bv += 1
+    bv_isolated = np.array(
+        [
+            all([neighbor is None or neighbor[0] < 0 for neighbor in neighbors])
+            for neighbors in hf_verts_neighbors
+        ]
+    )
+    bv_vertex_ids = np.arange(start=vertices.shape[0], stop=vertices.shape[0] + 4)
     vertices = np.vstack((vertices, hyperface_vertices))
 
     for i in range(len(hyperface_vertices)):
@@ -216,12 +235,15 @@ def split_hyperface(
         bf_cut_groups = [-1 for _ in range(len(cut_edges_groups))]
         bf_bv_groups = [-1 for _ in range(len(bf_vert_ids))]
         group_count = 0
+        groups = []
         for bfvi_id, bfvi in enumerate(bf_vert_ids):
             if bv_isolated[bfvi]:
                 continue
 
             if bf_bv_groups[bfvi_id] < 0:
                 bf_bv_groups[bfvi_id] = group_count
+                groups.append((set(), set()))
+                groups[group_count][0].add(bfvi)
                 group_count += 1
 
             for bfvj_id, bfvj in enumerate(bf_vert_ids):
@@ -234,8 +256,10 @@ def split_hyperface(
                 current_group = bf_bv_groups[bfvi_id]
                 if neighbor[0] < 0:
                     bf_bv_groups[bfvj_id] = current_group
+                    groups[current_group][0].add(bfvj)
                 else:
                     bf_cut_groups[neighbor[0]] = current_group
+                    groups[current_group][1].add(neighbor[0])
 
         # NOTE: cut pairs
         for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
@@ -249,6 +273,8 @@ def split_hyperface(
 
             if bf_cut_groups[cut_idx] < 0:
                 bf_cut_groups[cut_idx] = group_count
+                groups.append((set(), set()))
+                groups[group_count][1].add(cut_idx)
                 group_count += 1
 
             for bfvi_id, bfvi in enumerate(bf_vert_ids):
@@ -262,11 +288,15 @@ def split_hyperface(
 
                     current_group = bf_cut_groups[cut_idx]
                     bf_cut_groups[neighbor[0]] = current_group
+                    groups[current_group][1].add(neighbor[0])
 
         # NOTE: find cut's points on this boundary face
         bf_vertices = hyperface_vertices[bf_vert_ids]
         bfO = bf_vertices[0:1].T
         bfV = bf_vertices[1:].T - bfO
+        bfV_inv = la.pinv(bfV)
+
+        cut_bf_vertices = (bfV_inv @ (vertices.T - bfO)).T
 
         # WARNING: Only valid for 2D case now
         # To support 3D case, need to connenct bv with vertices that has only
@@ -277,7 +307,7 @@ def split_hyperface(
             for cut_edge in cut_edges_ids:
                 edge = edges[cut_edge]
                 verts = vertices[edge]
-                verts_proj = (np.linalg.pinv(bfV) @ (verts.T - bfO)).T
+                verts_proj = cut_bf_vertices[edge]
                 diff = np.linalg.norm(verts - (bfV @ verts_proj.T + bfO).T, axis=1)
                 is_verts_on_face = diff < TOL
 
@@ -287,9 +317,9 @@ def split_hyperface(
                 # )
                 # print(on_bf_edge)
 
-                # WARNING: Need to construct point order for 3D case
-                if len(is_verts_on_face) > 0:
-                    cut_on_bf_groups[cut_idx].extend(
+                # Add segment to new cut
+                if np.sum(is_verts_on_face * 1) == 2:
+                    cut_on_bf_groups[cut_idx].append(
                         edge[np.where(is_verts_on_face)].tolist()
                     )
 
@@ -301,104 +331,109 @@ def split_hyperface(
 
         # print(bf_cut_groups)
         # print(bf_bv_groups)
+        # print(groups)
+        # print(cut_hfe_neighbors)
 
         # TODO: fix holes on boundary face in 3D
-        for g in range(group_count):
-            new_cut_edge = []
-            for cut_idx, bf_cut_group in enumerate(bf_cut_groups):
-                if bf_cut_group == g:
-                    new_cut_edge.extend(cut_on_bf_groups[cut_idx])
-            for bv_idx, bf_bv_group in enumerate(bf_bv_groups):
-                if bf_bv_group == g:
-                    new_cut_edge.append(bv_vertice_ids[bf_vert_ids[bv_idx]])
+        for group in groups:
+            new_cut_segs = []
+            for cut_idx in group[1]:
+                new_cut_segs.extend(cut_on_bf_groups[cut_idx])
 
-            # WARNING: Just a hot fix
-            # if len(new_cut_edge) != 2:
-            #     print(hyperface_vertices)
-            #     print(hf_verts_neighbors)
-            #     print(cut_hfe_neighbors)
-            #     # print(bf_cut_groups)
-            #     # print(bf_bv_groups)
-            #     plot(ax, hyperface_vertices, vertices, edges)
-            #     raise ValueError("Invalid cut")
+                for bfvi_id in range(len(bf_vert_ids)):
+                    bfvi = bf_vert_ids[bfvi_id]
+                    for bfvj_id in range(bfvi_id + 1, len(bf_vert_ids)):
+                        bfvj = bf_vert_ids[bfvj_id]
+                        neighbor = cut_hfe_neighbors[cut_idx][bfvi][bfvj]
+                        if neighbor is None:
+                            continue
 
-            if len(new_cut_edge) > 0:
-                edges = np.vstack((edges, new_cut_edge))
+                        if neighbor[0] in group[1]:
+                            vert_from = cut_hfe_neighbors[neighbor[0]][bfvj][bfvi][1]
+                            new_cut_segs.append([vert_from, neighbor[1]])
+
+            for bfvi_id in group[0]:
+                bfvi = bf_vert_ids[bfvi_id]
+                for bfvj_id in range(bfvi_id + 1, len(bf_vert_ids)):
+                    bfvj = bf_vert_ids[bfvj_id]
+                    neighbor = hf_verts_neighbors[bfvi][bfvj]
+                    if neighbor is None:
+                        continue
+
+                    if neighbor[0] < 0 and bfvj in group[0]:
+                        vert_from = bv_vertex_ids[bfvi]
+                        vert_to = bv_vertex_ids[bfvj]
+                        new_cut_segs.append([vert_from, vert_to])
+
+            if len(new_cut_segs) > 0:
+                # TODO: Reuse MeshInfo
+                cut_segs = np.array(new_cut_segs)
+                verts, map_to, map_back = extract_vertices_from_edges(
+                    cut_bf_vertices, cut_segs
+                )
+                cut_segs = map_to(cut_segs)
+                # if verts.shape[0] < 3:
+                #     print(vertices)
+                #     print(edges)
+                #     print(i)
+                #     print(cut_edges_groups)
+                #     print(cut_on_bf_groups)
+                #     # print(groups)
+                #     # print(new_cut_segs)
+                #     print(hf_verts_neighbors)
+                #     print(cut_hfe_neighbors)
+                #     plot(ax, hyperface_vertices, vertices, edges)
+                #     plt.show()
+                _, cut_edges = triangulate(verts, cut_segs)
+                cut_edges = map_back(cut_edges)
+
+                edges = np.vstack((edges, cut_edges))
                 edge_norms = np.vstack((edge_norms, bf_norm))
 
-    # TODO: Split groups again
+    edges = np.sort(edges, axis=-1)
+    edges = np.sort(edges, axis=0)
+    edges = np.unique(edges, axis=0)
     cut_edges_groups = generate_cut_groups(vertices, edges)
-    # print(cut_edges_groups)
 
-    new_vertices_from_tri = []
-    new_vertices = np.empty((0, 2), dtype=float)
-    new_hyperfaces = np.empty((0, 3), dtype=int)
+    new_hyperfaces = np.empty((0, 4), dtype=int)
     for cut_edges_ids in cut_edges_groups:
         cut_edges = edges[cut_edges_ids]
-
-        vert_included = [False for _ in range(vertices.shape[0])]
-        new_vert_ids = [i for i in range(vertices.shape[0])]
-        old_vert_ids = []
-        group_vertices = []
-        for cut_edge in cut_edges:
-            for vertex in cut_edge:
-                if not vert_included[vertex]:
-                    new_vert_ids[vertex] = len(group_vertices)
-                    group_vertices.append(vertices[vertex])
-                    old_vert_ids.append(vertex)
-
-                vert_included[vertex] = True
-
-        map_to_new = np.vectorize(lambda x: new_vert_ids[x], cache=True)
+        group_vertices, map_to, map_back = extract_vertices_from_edges(
+            vertices, cut_edges
+        )
 
         group_vertices = np.array(group_vertices)
-        group_edges = map_to_new(cut_edges)
-        num_old_vertices = len(old_vert_ids)
+        group_edges = map_to(cut_edges)
 
-        # WARNING: Just a hot fix
-        # if group_vertices.shape[0] < 3:
-        #     plot(ax, hyperface_vertices, vertices, edges)
-        #     # print(cut_edges_groups)
-        #     raise ValueError("Invalid cut")
-            # continue
+        tetras = tetrahedralize(group_vertices, group_edges)
+        tetras = map_back(tetras)
 
-        info = triangle.MeshInfo()
-        info.set_points(group_vertices)
-        info.set_facets(group_edges)
+        new_hyperfaces = np.vstack((new_hyperfaces, tetras))
 
-        tri = triangle.build(info, volume_constraints=False)
-        group_vertices = np.array(tri.points)
-        group_triangles = np.array(tri.elements)
-
-        new_vertices_from_tri.append(group_vertices[num_old_vertices:])
-
-        # WARNING: Just a hot fix
-        if group_vertices.shape[0] == 0:
-            raise ValueError("Invalid cut")
-            # continue
-
-        num_new_vertices = new_vertices.shape[0]
-        group_triangles += num_new_vertices
-
-        new_vertices = np.vstack((new_vertices, group_vertices))
-        new_hyperfaces = np.vstack((new_hyperfaces, group_triangles))
-
-    # print(new_vertices_from_tri)
-
-    # TODO: There are some useless vertices, remove them
-
-    # print(new_vertices)
-    # print(hyperface_vertices)
-    # print(hyperface)
-    new_vertices, remap = remove_vertices_by_pos(
-        new_vertices, hyperface_vertices, hyperface - hyperface_vertices.shape[0]
-    )
-    new_hyperfaces = remap_vertex_indexes(new_hyperfaces, remap)
     new_hyperfaces += mesh_vertices.shape[0]
+    new_hyperfaces[-4:] = hyperface
 
-    new_vertices = (V @ new_vertices.T + O).T
+    # print(new_hyperfaces)
+    vertices = (V @ vertices.T + O).T
 
-    return new_vertices, new_hyperfaces
+    return vertices, new_hyperfaces
+
+
+def extract_vertices_from_edges(vertices: np.ndarray, edges: np.ndarray):
+    used_vertex_ids = np.unique(edges.flatten())
+    num_new_vertices = len(used_vertex_ids)
+
+    new_vert_ids = np.array([i for i in range(vertices.shape[0])])
+    old_vert_ids = np.array([i for i in range(num_new_vertices)])
+
+    new_vert_ids[used_vertex_ids] = old_vert_ids
+    old_vert_ids = used_vertex_ids
+
+    return (
+        vertices[used_vertex_ids],
+        np.vectorize(lambda x: new_vert_ids[x]),
+        np.vectorize(lambda x: old_vert_ids[x]),
+    )
 
 
 def generate_cut_groups(vertices: np.ndarray, edges: np.ndarray):

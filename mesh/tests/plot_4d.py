@@ -1,9 +1,8 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy import linalg as la
-import matplotlib.pyplot as plt
 
 from ..mesh import Mesh
-
 
 
 def init_sculpt():
@@ -38,7 +37,7 @@ def init_sculpt():
             [1, 2, 4, 7],
         ]
     )
-    
+
     hyperfaces = np.ndarray((0, 4), dtype=int)
     face_normals = []
     for i in range(4):
@@ -65,20 +64,23 @@ def init_sculpt():
             norm *= np.sign(np.dot(from_center, norm))
 
             face_normals.append(norm)
-        
+
         hyperfaces = np.vstack((hyperfaces, new_faces))
 
-    return Mesh(vertices, hyperfaces, face_normals)
+    return Mesh(vertices, hyperfaces, np.array(face_normals))
+
 
 sculpt = init_sculpt()
-sculpt3d = sculpt.project3dfrom4d([
-    [np.pi / 4, 0, 3], 
-    [np.pi / 4, 1, 3],
-    [np.pi / 4, 2, 3],
-    # [np.pi / 4, 0, 1],
-    # [np.pi / 4, 0, 2], 
-    # [np.pi / 4, 1, 2], 
-    ])
+sculpt3d = sculpt.project_3d_from_4d(
+    [
+        (np.pi / 4, 0, 3),
+        (np.pi / 4, 1, 3),
+        (np.pi / 4, 2, 3),
+        # (np.pi / 4, 0, 1),
+        # (np.pi / 4, 0, 2),
+        # (np.pi / 4, 1, 2),
+    ]
+)
 
 # plot
 fig = plt.figure()
@@ -87,6 +89,7 @@ ax.set_xlim([-0.2, 1.2])
 ax.set_ylim([-0.2, 1.2])
 ax.set_zlim([-0.2, 1.2])
 
+
 # NOTE: Testing functions
 def plot_3D_mesh(mesh: Mesh, color="blue"):
     for idx in range(mesh.num_faces):
@@ -94,6 +97,8 @@ def plot_3D_mesh(mesh: Mesh, color="blue"):
         verts = np.hstack((verts, verts[:, 0:1]))
         ax.plot(verts[0], verts[1], verts[2], color=color)
 
+
 plot_3D_mesh(sculpt3d)
+sculpt3d.to_wavefront("mesh/result/plot_4d.obj")
 
 plt.show()

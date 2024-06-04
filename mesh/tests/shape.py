@@ -1,5 +1,4 @@
 import numpy as np
-
 from convex import polyhedron_from_halfspaces
 from space import KSimplexSpace
 

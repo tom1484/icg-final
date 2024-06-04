@@ -164,8 +164,9 @@ def test_tetgen_points():
 
     mesh_info = MeshInfo()
     mesh_info.set_points(points)
-    options = Options("")
-    mesh = build(mesh_info, options=options)
+    # options = Options("")
+    # mesh = build(mesh_info, options=options)
+    mesh = build(mesh_info)
 
     print(len(mesh.points))
     print(len(mesh.elements))

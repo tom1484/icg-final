@@ -2,6 +2,11 @@ import numpy as np
 from scipy import linalg as la
 
 from .config import TOL
+from .utils import (
+    remap_vertex_indexes,
+    remove_redundant_vertices,
+    remove_vertices_by_pos,
+)
 
 
 def polyhedron_from_halfspaces(A, b):
@@ -25,6 +30,7 @@ def polyhedron_from_halfspaces(A, b):
     perms = sorted(perms)
     perms = [perms[i] for i in range(len(perms)) if i == 0 or perms[i] != perms[i - 1]]
 
+    points_on_plane = [[] for _ in range(N)]
     intersections = []
     for perm in perms:
         A_perm = A[perm, :]
@@ -56,5 +62,20 @@ def polyhedron_from_halfspaces(A, b):
             continue
 
         intersections.append(intersection)
+        for i in perm:
+            points_on_plane[i].append(len(intersections) - 1)
 
-    return np.array(intersections).T
+    edges = []
+    for i in range(N):
+        if len(points_on_plane[i]) >= dim:
+            edges.append(points_on_plane[i])
+
+    intersections = np.array(intersections)
+    if intersections.shape[0] == 0:
+        return intersections, []
+
+    intersections, remap = remove_redundant_vertices(intersections)
+    edges = [remap_vertex_indexes(edge, remap) for edge in edges]
+    edges = [np.unique(sorted(edge)) for edge in edges]
+
+    return intersections, edges

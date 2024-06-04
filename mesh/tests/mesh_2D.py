@@ -6,7 +6,7 @@ from scipy import linalg as la
 from ..convex import polyhedron_from_halfspaces
 from ..mesh import Mesh
 from ..space import KSimplexSpace, nd_rotation
-from ..split import split_hyperface
+from ..split_3D import split_3D_hyperface
 
 np.seterr(all="raise")
 
@@ -184,7 +184,6 @@ def project_norm_to_hyperface(norm: np.ndarray, hyperface: np.ndarray):
 
 
 def perform_cut(cuts, sculpt, debug=False):
-    new_vertices = np.empty((0, 3))
     # hole's (boundary points, edges, edge directions)
     sculpt_face_holes = [[np.empty((0, 3)), [], []] for _ in range(sculpt.num_faces)]
     cuts_face_holes = [[np.empty((0, 3)), [], []] for _ in range(cuts.num_faces)]
@@ -207,17 +206,15 @@ def perform_cut(cuts, sculpt, debug=False):
             pA = np.vstack((pA1, pA2))
             pb = np.vstack((pb1, pb2))
 
-            intersections_p = polyhedron_from_halfspaces(pA, pb)
+            intersections_p, _ = polyhedron_from_halfspaces(pA, pb)
 
             # Non-paralell case
             try:
                 if intersections_p.T.shape[0] > 1:
                     if Si.k == Si.dim - 2:
-                        intersections = (Si.O + Si.V @ intersections_p).T
+                        intersections = (Si.O + Si.V @ intersections_p.T).T
                         # ax.scatter(intersections[:, 0], intersections[:, 1], intersections[:, 2])
                         # Add vertices to holes on faces
-                        # len_new = len(new_vertices)
-                        new_vertices = np.vstack((new_vertices, intersections))
 
                         cut_norm = cuts.face_normals[cut_idx]
                         sculpt_norm = sculpt.face_normals[sculpt_idx]
@@ -298,7 +295,7 @@ def perform_cut(cuts, sculpt, debug=False):
         hyperface = cuts_hyperfaces[i]
 
         try:
-            new_verts, new_hfs = split_hyperface(
+            new_verts, new_hfs = split_3D_hyperface(
                 ax, all_vertices, hyperface, (h_vertices, h_faces, h_normals)
             )
             new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
@@ -328,7 +325,7 @@ def perform_cut(cuts, sculpt, debug=False):
         hyperface = sculpt_hyperfaces[i]
 
         try:
-            new_verts, new_hfs = split_hyperface(
+            new_verts, new_hfs = split_3D_hyperface(
                 ax, all_vertices, hyperface, (h_vertices, h_faces, h_normals)
             )
             new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
@@ -347,13 +344,14 @@ def perform_cut(cuts, sculpt, debug=False):
     return Mesh(all_vertices, new_hyperfaces, new_normals)
 
 
-sculpt0 = perform_cut(cuts0, sculpt)
-sculpt1 = perform_cut(cuts1, sculpt0, debug=True)
+# sculpt0 = perform_cut(cuts0, sculpt)
+# sculpt1 = perform_cut(cuts1, sculpt0, debug=True)
+sculpt1 = perform_cut(cuts1, cuts0)
 
 # print(sculpt1.num_verts)
 # print(sculpt1.num_faces)
 
-plot_3D_mesh(sculpt, color="blue")
+# plot_3D_mesh(sculpt, color="blue")
 # plot_3D_mesh(cuts0, color="green")
 
 # plot_3D_mesh(sculpt0, color="red")
@@ -361,10 +359,29 @@ plot_3D_mesh(sculpt, color="blue")
 # sculpt0.reorder_faces()
 # sculpt0.to_wavefront("mesh/result/sculpt0.obj")
 
-# plot_3D_mesh(sculpt1, color="red")
+# def plot_mesh_gif(mesh: Mesh):
+#     fig = plt.figure()
+#     ax = plt.axes(projection="3d")
+#     ax.set_xlim([-0.2, 1.2])
+#     ax.set_ylim([-0.2, 1.2])
+#     ax.set_zlim([-0.2, 1.2])
+#
+#     image_array = []
+#     image = np.empty((600, 800, 4), dtype=np.uint8)
+#
+#     for i in range(mesh.num_faces):
+#         plt.cla()
+#         verts = mesh.get_hyperface(i)
+#         verts = np.vstack((verts, verts[0:1]))
+#         ax.plot(verts[:, 0], verts[:, 1], verts[:, 2], color="blue")
+#         # plt.draw()
+#         plt.imshow(image)
+
+plot_3D_mesh(sculpt1, color="red")
 # plot_3D_mesh(cuts1, color="green")
-# sculpt1.reorder_faces()
-# sculpt1.to_wavefront("mesh/result/sculpt1.obj")
+# plot_mesh_gif(sculpt1)
+sculpt1.reorder_faces()
+sculpt1.to_wavefront("mesh/result/sculpt1.obj")
 
 # for edge in new_hyperfaces:
 #     h_verts = all_vertices[edge]
