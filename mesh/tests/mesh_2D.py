@@ -3,16 +3,16 @@ import numpy as np
 import tqdm
 from scipy import linalg as la
 
-from ..config import TOL
 from ..convex import polyhedron_from_halfspaces
-from ..mesh import Mesh, split_hyperface
+from ..mesh import Mesh
 from ..space import KSimplexSpace, nd_rotation
+from ..split import split_hyperface
 
 np.seterr(all="raise")
 
 
 def init_sculpt():
-    # Create initial 4D cube
+    # Create initial 3D cube
     vertices = np.array(
         [
             [0.0, 0.0, 0.0],
@@ -53,7 +53,6 @@ def init_sculpt():
                     )
                 )
             ).T[0]
-            # cross /= np.sqrt(np.sum(np.square(cross)))
 
             # determine direction
             from_center = face_vertices[0] - 0.5
@@ -258,20 +257,20 @@ def perform_cut(cuts, sculpt, debug=False):
                         pass
 
             except FloatingPointError as e:
-                print(T0)
-                plot_polygon(T0, color="red")
-                print(T1)
-                plot_polygon(T1, color="blue")
-                # print(intersections)
-                # ax.scatter(intersections[:, 0], intersections[:, 1], intersections[:, 2])
-                # print(Si.V / np.linalg.norm(Si.V))
-                n0 = np.cross(T0[1] - T0[0], T0[2] - T0[0])
-                n0 /= np.linalg.norm(n0)
-                n1 = np.cross(T1[1] - T1[0], T1[2] - T1[0])
-                n1 /= np.linalg.norm(n1)
-
-                print(n0, cut_norm)
-                print(n1, sculpt_norm)
+                # print(T0)
+                # plot_polygon(T0, color="red")
+                # print(T1)
+                # plot_polygon(T1, color="blue")
+                # # print(intersections)
+                # # ax.scatter(intersections[:, 0], intersections[:, 1], intersections[:, 2])
+                # # print(Si.V / np.linalg.norm(Si.V))
+                # n0 = np.cross(T0[1] - T0[0], T0[2] - T0[0])
+                # n0 /= np.linalg.norm(n0)
+                # n1 = np.cross(T1[1] - T1[0], T1[2] - T1[0])
+                # n1 /= np.linalg.norm(n1)
+                #
+                # print(n0, cut_norm)
+                # print(n1, sculpt_norm)
                 # n01 = np.cross(n0, n1)
                 # n01 /= np.linalg.norm(n01)
                 # print(n01)
@@ -298,9 +297,9 @@ def perform_cut(cuts, sculpt, debug=False):
 
         hyperface = cuts_hyperfaces[i]
 
-        if not debug:
+        try:
             new_verts, new_hfs = split_hyperface(
-                all_vertices, hyperface, (h_vertices, h_faces, h_normals)
+                ax, all_vertices, hyperface, (h_vertices, h_faces, h_normals)
             )
             new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
             all_vertices = np.vstack((all_vertices, new_verts))
@@ -310,6 +309,12 @@ def perform_cut(cuts, sculpt, debug=False):
                     np.repeat(cuts.face_normals[i : i + 1], new_hfs.shape[0], axis=0),
                 )
             )
+        except ValueError as e:
+            if debug:
+                print("cut:", i)
+                # plot_3D_mesh(cuts, color="green")
+                plt.show()
+            raise e
 
     for i in range(sculpt.num_faces):
         # for i in tqdm.tqdm(range(sculpt.num_faces)):
@@ -322,9 +327,9 @@ def perform_cut(cuts, sculpt, debug=False):
 
         hyperface = sculpt_hyperfaces[i]
 
-        if not debug:
+        try:
             new_verts, new_hfs = split_hyperface(
-                all_vertices, hyperface, (h_vertices, h_faces, h_normals)
+                ax, all_vertices, hyperface, (h_vertices, h_faces, h_normals)
             )
             new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
             all_vertices = np.vstack((all_vertices, new_verts))
@@ -334,17 +339,21 @@ def perform_cut(cuts, sculpt, debug=False):
                     np.repeat(sculpt.face_normals[i : i + 1], new_hfs.shape[0], axis=0),
                 )
             )
+        except ValueError as e:
+            if debug:
+                print("sculpt:", i)
+            raise e
 
     return Mesh(all_vertices, new_hyperfaces, new_normals)
 
 
 sculpt0 = perform_cut(cuts0, sculpt)
-sculpt1 = perform_cut(cuts1, sculpt0, debug=False)
+sculpt1 = perform_cut(cuts1, sculpt0, debug=True)
 
-print(sculpt1.num_verts)
-print(sculpt1.num_faces)
+# print(sculpt1.num_verts)
+# print(sculpt1.num_faces)
 
-# plot_3D_mesh(sculpt, color="blue")
+plot_3D_mesh(sculpt, color="blue")
 # plot_3D_mesh(cuts0, color="green")
 
 # plot_3D_mesh(sculpt0, color="red")
@@ -362,4 +371,4 @@ print(sculpt1.num_faces)
 #     h_verts = np.vstack((h_verts, h_verts[0:1]))
 #     ax.plot(h_verts[:, 0], h_verts[:, 1], h_verts[:, 2], color="red")
 
-# plt.show()
+plt.show()
