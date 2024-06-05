@@ -3,6 +3,7 @@ from typing import List, Tuple
 import meshpy.triangle as triangle
 import numpy as np
 from scipy import linalg as la
+from tqdm import tqdm
 
 from .config import TOL
 
@@ -25,7 +26,8 @@ class Mesh:
         self.num_verts = self.vertices.shape[0]
         self.num_faces = self.hyperfaces.shape[0]
 
-        norms = np.sqrt(np.sum(np.square(face_normals), axis=1, keepdims=True))
+        norms = la.norm(face_normals, axis=1, keepdims=True)
+        norms[norms < TOL] = 1  # pyright: ignore
         face_normals /= norms
         self.face_normals = face_normals
 
@@ -64,17 +66,17 @@ class Mesh:
             return
 
         for face_id, face in enumerate(self.hyperfaces):
-            for face_id, face in enumerate(self.hyperfaces):
-                # check triangle direction
-                face_vertices = self.vertices[face]
-                face_normals = self.face_normals[face_id]
-                norm = np.cross(
-                    face_vertices[1] - face_vertices[0],
-                    face_vertices[2] - face_vertices[1],
-                )
+        # for face_id in tqdm(range(self.num_faces)):
+            # check triangle direction
+            face_vertices = self.vertices[face]
+            face_normals = self.face_normals[face_id]
+            norm = np.cross(
+                face_vertices[1] - face_vertices[0],
+                face_vertices[2] - face_vertices[1],
+            )
 
-                if np.dot(norm, face_normals) < 0:
-                    self.hyperfaces[face_id] = face[::-1]
+            if np.dot(norm, face_normals) < 0:
+                self.hyperfaces[face_id] = face[::-1]
 
     def get_hyperface(self, face_index: int):
         return self.vertices[self.hyperfaces[face_index]].T
@@ -118,7 +120,8 @@ class Mesh:
         hyperfaces = np.ndarray((0, 3), dtype=int)
         face_normals = np.ndarray((0, 3), dtype=float)
         patterns = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]
-        for face in self.hyperfaces:
+        for face_id, face in enumerate(self.hyperfaces):
+            norm_projected = self.face_normals[face_id][:-1]
             for pattern in patterns:
                 new_face = face[pattern]
                 face_vertices = new_vertices[new_face]
@@ -130,6 +133,7 @@ class Mesh:
                         )
                     )
                 ).T[0]
+                norm *= np.sign(np.dot(norm_projected, norm))
                 face_normals = np.vstack((face_normals, norm))
                 hyperfaces = np.vstack((hyperfaces, new_face))
 

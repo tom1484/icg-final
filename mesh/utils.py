@@ -62,3 +62,20 @@ def remove_redundant_vertices(vertices: np.ndarray):
 def remap_vertex_indexes(faces: np.ndarray, remap: np.ndarray):
     map_func = np.vectorize(lambda x: remap[x], cache=True)
     return map_func(faces)
+
+
+def extract_vertices_from_edges(vertices: np.ndarray, edges: np.ndarray):
+    used_vertex_ids = np.unique(edges.flatten())
+    num_new_vertices = len(used_vertex_ids)
+
+    new_vert_ids = np.array([i for i in range(vertices.shape[0])])
+    old_vert_ids = np.array([i for i in range(num_new_vertices)])
+
+    new_vert_ids[used_vertex_ids] = old_vert_ids
+    old_vert_ids = used_vertex_ids
+
+    return (
+        vertices[used_vertex_ids],
+        np.vectorize(lambda x: new_vert_ids[x]),
+        np.vectorize(lambda x: old_vert_ids[x]),
+    )

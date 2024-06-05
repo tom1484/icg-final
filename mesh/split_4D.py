@@ -7,6 +7,11 @@ from scipy import linalg as la
 
 from .config import TOL
 from .triangle import tetrahedralize, triangulate
+from .utils import (
+    extract_vertices_from_edges,
+    remap_vertex_indexes,
+    remove_redundant_vertices
+)
 
 
 def plot(ax, hyperface_vertices, h_vertices, h_edges):
@@ -419,23 +424,6 @@ def split_4D_hyperface(
     return vertices, new_hyperfaces
 
 
-def extract_vertices_from_edges(vertices: np.ndarray, edges: np.ndarray):
-    used_vertex_ids = np.unique(edges.flatten())
-    num_new_vertices = len(used_vertex_ids)
-
-    new_vert_ids = np.array([i for i in range(vertices.shape[0])])
-    old_vert_ids = np.array([i for i in range(num_new_vertices)])
-
-    new_vert_ids[used_vertex_ids] = old_vert_ids
-    old_vert_ids = used_vertex_ids
-
-    return (
-        vertices[used_vertex_ids],
-        np.vectorize(lambda x: new_vert_ids[x]),
-        np.vectorize(lambda x: old_vert_ids[x]),
-    )
-
-
 def generate_cut_groups(vertices: np.ndarray, edges: np.ndarray):
     connected_edges = [[] for _ in range(edges.shape[0])]
     for bi in range(edges.shape[0]):
@@ -470,63 +458,3 @@ def generate_cut_groups(vertices: np.ndarray, edges: np.ndarray):
         cut_groups.append(component)
 
     return cut_groups
-
-
-def remove_vertices_by_pos(
-    vertices: np.ndarray,
-    vertices_to_remove: np.ndarray,
-    new_indexes_for_removed: np.ndarray,
-):
-    N = vertices.shape[0]
-
-    remap = np.zeros(N, dtype=int)
-    removed = np.zeros(N, dtype=bool)
-    for vertex, index in zip(vertices_to_remove, new_indexes_for_removed):
-        diff = la.norm(vertices - vertex, axis=1)
-        identical = diff < TOL
-        removed = np.logical_or(removed, identical)
-        remap[identical] = index
-
-    remap[~removed] = np.arange(np.sum(~removed))
-
-    return vertices[~removed], remap
-
-
-# Remove redundant vertices on holes
-def remove_redundant_vertices(vertices: np.ndarray):
-    N = vertices.shape[0]
-
-    # NOTE: Check duplicated vertices
-    exists = np.ones(N, dtype=bool)
-    remap = np.array([i for i in range(N)], dtype=int)
-
-    for i in range(N):
-        if not exists[i]:
-            continue
-
-        identicals = np.logical_and(
-            exists, np.sqrt(np.sum(np.square(vertices[i] - vertices), axis=1)) < TOL
-        )
-        identicals[i] = False
-
-        if len(identicals) > 0:
-            exists[identicals] = False
-            remap[identicals] = i
-
-    prefix_counts = np.zeros(N, dtype=int)
-    prefix_counts[0] = 1 if exists[0] else 0
-    for i in range(1, N):
-        prefix_counts[i] = prefix_counts[i - 1] + (1 if exists[i] else 0)
-
-    shrink_map = np.zeros(N, dtype=int)
-    shrink_map[exists] = prefix_counts[exists] - 1
-
-    for i in range(N):
-        remap[i] = shrink_map[remap[i]]
-
-    return vertices[exists], remap
-
-
-def remap_vertex_indexes(faces: np.ndarray, remap: np.ndarray):
-    map_func = np.vectorize(lambda x: remap[x], cache=True)
-    return map_func(faces)

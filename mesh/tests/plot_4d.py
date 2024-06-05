@@ -3,6 +3,7 @@ import numpy as np
 from scipy import linalg as la
 
 from ..mesh import Mesh
+from ..plot import plot_3D_mesh
 
 
 def init_sculpt():
@@ -90,15 +91,8 @@ ax.set_ylim([-0.2, 1.2])
 ax.set_zlim([-0.2, 1.2])
 
 
-# NOTE: Testing functions
-def plot_3D_mesh(mesh: Mesh, color="blue"):
-    for idx in range(mesh.num_faces):
-        verts = mesh.get_hyperface(idx)
-        verts = np.hstack((verts, verts[:, 0:1]))
-        ax.plot(verts[0], verts[1], verts[2], color=color)
-
-
-plot_3D_mesh(sculpt3d)
+plot_3D_mesh(ax, sculpt3d, plot_normal=True)
+sculpt3d.reorder_faces()
 sculpt3d.to_wavefront("mesh/result/plot_4d.obj")
 
 plt.show()
