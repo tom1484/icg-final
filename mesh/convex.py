@@ -78,4 +78,24 @@ def polyhedron_from_halfspaces(A, b):
     edges = [remap_vertex_indexes(edge, remap) for edge in edges]
     edges = [np.unique(sorted(edge)) for edge in edges]
 
+    # return intersections, edges
     return intersections, edges
+
+
+def edges_from_2D_convex(vertices: np.ndarray):
+    """
+    This function finds the edges of a 2D convex polygon.
+    """
+    root = np.argmin(vertices[:, 0])
+    diff = vertices - vertices[root]
+    angles = np.arctan2(diff[:, 1], diff[:, 0])
+    angles[root] = -np.inf
+    order = np.argsort(angles)
+    edges = np.vstack((order, np.roll(order, -1))).T
+
+    diff = diff[edges]
+    area = np.sum(np.cross(diff[:, 0], diff[:, 1]))
+    if area < TOL:
+        return np.array([])
+
+    return edges

@@ -1,37 +1,40 @@
+import time
+
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 from scipy import linalg as la
 
-from ..config import TOL
+from mesh.utils import reorder_triangles_by_norm
 
-from ..convex import polyhedron_from_halfspaces
+from ..config import TOL
+from ..convex import edges_from_2D_convex, polyhedron_from_halfspaces
 from ..mesh import Mesh
-from ..plot import plot_3D_mesh
+from ..plot import plot_3D_mesh, plot_3D_polygon
 from ..space import KSimplexSpace, nd_rotation
-from ..split_4D import split_4D_hyperface
+from ..split_4D import plot_2D_polygon, split_4D_hyperface
 from ..triangle import triangulate
 
 
 def init_sculpt():
     vertices = np.array(
         [
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [1.0, 0.0, 1.0, 0.0],
-            [0.0, 1.0, 1.0, 0.0],
-            [1.0, 1.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-            [1.0, 0.0, 0.0, 1.0],
-            [0.0, 1.0, 0.0, 1.0],
-            [1.0, 1.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0, 1.0],
-            [1.0, 0.0, 1.0, 1.0],
-            [0.0, 1.0, 1.0, 1.0],
-            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.2],
+            [1.0, 0.0, 0.0, 0.2],
+            [0.0, 1.0, 0.0, 0.2],
+            [1.0, 1.0, 0.0, 0.2],
+            [0.0, 0.0, 1.0, 0.2],
+            [1.0, 0.0, 1.0, 0.2],
+            [0.0, 1.0, 1.0, 0.2],
+            [1.0, 1.0, 1.0, 0.2],
+            [0.0, 0.0, 0.0, 0.8],
+            [1.0, 0.0, 0.0, 0.8],
+            [0.0, 1.0, 0.0, 0.8],
+            [1.0, 1.0, 0.0, 0.8],
+            [0.0, 0.0, 1.0, 0.8],
+            [1.0, 0.0, 1.0, 0.8],
+            [0.0, 1.0, 1.0, 0.8],
+            [1.0, 1.0, 1.0, 0.8],
         ]
     )
 
@@ -143,7 +146,7 @@ def generate_cuts(mesh: Mesh, RM: np.ndarray, axis):
 #     return cuts
 
 # TODO: Revert the mesh for cutting
-mesh = Mesh(
+mesh0 = Mesh(
     np.array(
         [
             [0.2, 0.2, 0.2],
@@ -192,11 +195,51 @@ mesh = Mesh(
         dtype=np.float64,
     ),
 )
-# RM = nd_rotation(0.7, 3, 0, 2)
+mesh1 = Mesh(
+    np.array(
+        [
+            [0.2, 0.3, 0.2],
+            [0.7, 0.2, 0.2],
+            [0.5, 0.8, 0.2],
+            [0.2, 0.3, 0.8],
+            [0.7, 0.2, 0.8],
+            [0.5, 0.8, 0.8],
+        ],
+        dtype=np.float64,
+    ),
+    np.array(
+        [
+            [2, 1, 0],
+            [0, 1, 3],
+            [1, 4, 3],
+            [2, 0, 5],
+            [0, 3, 5],
+            [1, 2, 4],
+            [2, 5, 4],
+            [3, 4, 5],
+        ],
+        dtype=np.int32,
+    ),
+    np.array(
+        [
+            [0, 0, -1],
+            [0, -1, 0],
+            [0, -1, 0],
+            [-0.894427, 0.447213, 0],
+            [-0.894427, 0.447213, 0],
+            [0.894427, 0.447213, 0],
+            [0.894427, 0.447213, 0],
+            [0, 0, 1],
+            [0, 0, 1],
+        ],
+        dtype=np.float64,
+    ),
+)
+# RM = nd_rotation(0.3, 3, 0, 2)
 RM = np.identity(3)
 
-cuts0 = generate_cuts(mesh, RM, 3)
-cuts1 = generate_cuts(mesh, RM, 0)
+cuts0 = generate_cuts(mesh0, RM, 3)
+cuts1 = generate_cuts(mesh1, RM, 2)
 
 # Display
 fig = plt.figure()
@@ -239,61 +282,112 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
             pA = np.vstack((pA1, pA2))
             pb = np.vstack((pb1, pb2))
 
+            redundant = np.logical_and(np.all(np.abs(pA) < TOL, axis=1), pb.T[0] >= 0)
+            pA = pA[~redundant]
+            pb = pb[~redundant]
+
             intersections_p, edges = polyhedron_from_halfspaces(pA, pb)
+            # if cut_idx == 0 and sculpt_idx == 1:
+            #     # print(sculpt_idx)
+            #     # print(np.hstack((pA, pb)))
+            #     # print(redundant)
+            #     pass
 
-            # Non-paralell case
-            try:
-                if intersections_p.T.shape[0] > 1:
-                    if Si.k == Si.dim - 2:
-                        # Ensure that the intersection is a polygon
-                        if intersections_p.shape[0] <= 2:
-                            continue
+            if intersections_p.T.shape[0] > 1:
+                # Non-paralell case
+                if Si.k == Si.dim - 2:
+                    # Ensure that the intersection is a polygon
+                    if intersections_p.shape[0] <= 2:
+                        continue
 
-                        # NOTE: Edges are exact pairs in this case
-                        edges = np.array(edges)
-                        _, edges = triangulate(intersections_p, np.array(edges))
-                        intersections = (Si.O + Si.V @ intersections_p.T).T
+                    # NOTE: Edges are exact pairs in this case
+                    edges = np.array(edges_from_2D_convex(intersections_p))
+                    _, edges = triangulate(intersections_p, np.array(edges))
+                    intersections = (Si.O + Si.V @ intersections_p.T).T
 
-                        # Add vertices to holes on faces
-                        cut_norm = cuts.face_normals[cut_idx]
-                        sculpt_norm = sculpt.face_normals[sculpt_idx]
+                    # if cut_idx == 2:
+                    #     print(intersections_p)
+                    #     print(edges)
 
-                        cuts_faces_hole = cuts_face_holes[cut_idx]
-                        cuts_faces_hole[1].extend(edges + len(cuts_faces_hole[0]))
-                        # cuts_faces_hole[1].append(edges + len(cuts_faces_hole[0]))
-                        cuts_faces_hole[0].extend(intersections)
-                        cuts_faces_hole[2].extend(
-                            np.repeat(
-                                -project_norm_to_hyperface(
-                                    sculpt_norm, cut_norm
-                                ).reshape((1, 4)),
-                                len(edges),
-                                axis=0,
-                            )
+                    cut_norm = cuts.face_normals[cut_idx]
+                    sculpt_norm = sculpt.face_normals[sculpt_idx]
+
+                    norm_sculpt_on_cut = -project_norm_to_hyperface(sculpt_norm, cut_norm)
+                    norm_cut_on_sculpt = -project_norm_to_hyperface(cut_norm, sculpt_norm)
+
+                    # Add vertices to holes on faces
+                    cuts_faces_hole = cuts_face_holes[cut_idx]
+                    cuts_faces_hole[1].extend(edges + len(cuts_faces_hole[0]))
+                    # cuts_faces_hole[1].append(edges + len(cuts_faces_hole[0]))
+                    cuts_faces_hole[0].extend(intersections)
+                    cuts_faces_hole[2].extend(
+                        np.repeat(
+                            norm_sculpt_on_cut.reshape((1, 4)), len(edges), axis=0
                         )
-                        # cuts_faces_hole[2].append(
-                        #     -project_norm_to_hyperface(sculpt_norm, cut_norm)
-                        # )
+                    )
+                    # cuts_faces_hole[2].append(
+                    #     -project_norm_to_hyperface(sculpt_norm, cut_norm)
+                    # )
 
-                        sculpt_faces_hole = sculpt_face_holes[sculpt_idx]
-                        sculpt_faces_hole[1].extend(edges + len(sculpt_faces_hole[0]))
-                        sculpt_faces_hole[0].extend(intersections)
+                    sculpt_faces_hole = sculpt_face_holes[sculpt_idx]
+                    sculpt_faces_hole[1].extend(edges + len(sculpt_faces_hole[0]))
+                    sculpt_faces_hole[0].extend(intersections)
+                    sculpt_faces_hole[2].extend(
+                        np.repeat(
+                            norm_cut_on_sculpt.reshape((1, 4)), len(edges), axis=0
+                        )
+                    )
+
+                # Paralell case
+                else:
+                    continue
+                    # if cut_idx == 0:
+                    #     print(intersections_p)
+                    #     print(edges)
+                    sculpt_norm = sculpt.face_normals[sculpt_idx]
+
+                    sculpt_faces_hole = sculpt_face_holes[sculpt_idx]
+                    vertex_id_shift = len(sculpt_faces_hole[0])
+
+                    faces = edges
+                    intersections = (Si.O + Si.V @ intersections_p.T).T
+                    sculpt_faces_hole[0].extend(intersections)
+
+                    # Edge face is a convex hull
+                    center = np.mean(intersections, axis=0, keepdims=True)
+                    for face in faces:
+                        if face.shape[0] > 3:
+                            vertices = intersections_p[face]
+                            O = np.mean(vertices, axis=0, keepdims=True).T
+                            V_inv = la.pinv(vertices[:2].T - O)
+
+                            vertices = (V_inv @ (vertices.T - O)).T
+                            pairs = edges_from_2D_convex(vertices)
+                            if pairs.shape[0] == 0:
+                                continue
+
+                            _, tris = triangulate(vertices, pairs)
+                            # print(tris)
+                            map_id = np.vectorize(lambda x: face[x])
+                            face = map_id(tris)
+                        else:
+                            face = face.reshape((1, 3))
+
+                        edges = face[0]
+                        O = intersections[edges[0:1]]
+                        norm = np.sum(
+                            la.null_space(intersections[edges[1:]] - O).T, axis=0
+                        )
+                        norm *= np.sign(np.dot(O - center, norm))
+                        norm = -project_norm_to_hyperface(norm, sculpt_norm)
+
+                        # TODO: Add vertices to holes on faces
+                        sculpt_faces_hole[1].extend(face + vertex_id_shift)
                         sculpt_faces_hole[2].extend(
-                            np.repeat(
-                                -project_norm_to_hyperface(
-                                    cut_norm, sculpt_norm
-                                ).reshape((1, 4)),
-                                len(edges),
-                                axis=0,
-                            )
+                            np.repeat(norm.reshape((1, 4)), len(edges), axis=0)
                         )
 
-                    # Paralell case
-                    else:
-                        pass
-
-            except FloatingPointError as e:
-                raise e
+    # return sculpt
 
     all_vertices = np.vstack((sculpt.vertices, cuts.vertices))
     sculpt_hyperfaces = sculpt.hyperfaces
@@ -302,7 +396,9 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
     new_hyperfaces = np.empty((0, 4), dtype=np.int32)
     new_normals = np.empty((0, 4), dtype=np.float64)
 
-    for i in range(cuts.num_faces):
+    # for i in range(cuts.num_faces):
+    for i in tqdm.tqdm(range(cuts.num_faces)):
+        # break
         # TODO: Simplify hole
         # vertices = cuts_face_holes[i][0]
         # faces = cuts_face_holes[i][1]
@@ -338,11 +434,17 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
         if h_vertices.shape[0] == 0:
             continue
 
-        hyperface = cuts_hyperfaces[i]
+        # print(h_vertices)
+        # print(h_faces)
+        # print(h_normals)
 
+        hyperface = cuts_hyperfaces[i]
         new_verts, new_hfs = split_4D_hyperface(
             ax, all_vertices, hyperface, (h_vertices, h_faces, h_normals)
         )
+        if new_hfs.shape[0] == 0:
+            continue
+
         new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
         all_vertices = np.vstack((all_vertices, new_verts))
         new_normals = np.vstack(
@@ -352,8 +454,14 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
             )
         )
 
-    for i in range(sculpt.num_faces):
-        # for i in tqdm.tqdm(range(sculpt.num_faces)):
+        # break
+
+    for i in tqdm.tqdm(range(sculpt.num_faces)):
+        # break
+        # for i in range(sculpt.num_faces):
+        # if i != 11:
+        #     continue
+
         h_vertices = np.array(sculpt_face_holes[i][0])
         h_faces = np.array(sculpt_face_holes[i][1])
         h_normals = np.array(sculpt_face_holes[i][2])
@@ -361,11 +469,15 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
         if h_vertices.shape[0] == 0:
             continue
 
-        hyperface = sculpt_hyperfaces[i]
+        # print(i)
 
+        hyperface = sculpt_hyperfaces[i]
         new_verts, new_hfs = split_4D_hyperface(
             ax, all_vertices, hyperface, (h_vertices, h_faces, h_normals)
         )
+        if new_hfs.shape[0] == 0:
+            continue
+
         new_hyperfaces = np.vstack((new_hyperfaces, new_hfs))
         all_vertices = np.vstack((all_vertices, new_verts))
         new_normals = np.vstack(
@@ -375,37 +487,44 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
             )
         )
 
-    # print(new_normals)
-
-    # WARNING: Remove this
-    # remove_faces = np.ones(new_hyperfaces.shape[0], dtype=bool)
-    # for i, face in enumerate(new_hyperfaces):
-    #     face_vertices = all_vertices[face]
-    #     # print(np.abs(face_vertices - 0.5))
-    #     remove_faces[i] = np.all(np.abs(face_vertices[:, :3] - 0.5) < 0.4)
-    # new_hyperfaces = new_hyperfaces[~remove_faces]
-    # new_normals = new_normals[~remove_faces]
+        # test_mesh = Mesh(all_vertices, new_hyperfaces, new_normals)
+        # test_mesh_3D = test_mesh.project_3d_from_4d([])
+        # plot_3D_mesh(ax, test_mesh_3D, plot_normal=False)
+        # plt.pause(2)
 
     return Mesh(all_vertices, new_hyperfaces, new_normals)
 
 
-sculpt0 = perform_cut(cuts0, sculpt, debug=True)
-# sculpt1 = perform_cut(cuts1, sculpt0, debug=True)
+# plt.ion()
+# plt.show()
 
-sculpt_3D = sculpt0.project_3d_from_4d(
+sculpt = perform_cut(cuts1, sculpt, debug=True)
+# sculpt1 = perform_cut(cuts1, sculpt0, debug=True)
+# sculpt = perform_cut(cuts1, cuts0, debug=True)
+
+# sculpt_3D = sculpt0.project_3d_from_4d(
+
+# s = time.time()
+sculpt_3D = sculpt.project_3d_from_4d(
     [
         # (np.pi / 4, 0, 3),
         # (np.pi / 4, 1, 3),
         # (np.pi / 4, 2, 3),
         # (np.pi / 4, 0, 1),
         # (np.pi / 4, 0, 2),
-        # (np.pi / 4, 1, 2),
+        (np.pi / 2, 1, 2),
     ]
 )
+# print(time.time() - s)
 sculpt_3D.reorder_faces()
 sculpt_3D.to_wavefront("mesh/result/sculpt_4D.obj")
 
 # print(sculpt_3D.hyperfaces)
 # print(sculpt_3D.face_normals)
-# plot_3D_mesh(ax, sculpt_3D, plot_normal=True)
+# plot_3D_mesh(ax, sculpt_3D, plot_normal=False)
 # plt.show()
+
+import pickle
+
+with open("mesh/result/sculpt_4D.pkl", "wb") as f:
+    pickle.dump(sculpt, f)

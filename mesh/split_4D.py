@@ -10,11 +10,13 @@ from .triangle import tetrahedralize, triangulate
 from .utils import (
     extract_vertices_from_edges,
     remap_vertex_indexes,
-    remove_redundant_vertices
+    remove_redundant_vertices,
+    remove_unused_vertices,
+    reorder_triangles_by_norm,
 )
 
 
-def plot(ax, hyperface_vertices, h_vertices, h_edges):
+def plot(ax, hyperface_vertices, h_vertices, h_edges, h_normals=None):
     for i in range(hyperface_vertices.shape[0]):
         for j in range(i + 1, hyperface_vertices.shape[0]):
             ax.plot(
@@ -44,6 +46,21 @@ def plot(ax, hyperface_vertices, h_vertices, h_edges):
         color="blue",
     )
 
+    if h_normals is not None:
+        for i in range(h_edges.shape[0]):
+            edge = h_edges[i]
+            edge_verts = h_vertices[edge]
+            center = np.mean(edge_verts, axis=0)
+            ax.quiver(
+                center[0],
+                center[1],
+                center[2],
+                h_normals[i][0] * 0.2,
+                h_normals[i][1] * 0.2,
+                h_normals[i][2] * 0.2,
+                color="red",
+            )
+
 
 def plot_2D_polygon(ax, vertices, segs, color="blue"):
     # verts = np.vstack((vertices, vertices[0:1]))
@@ -67,361 +84,415 @@ def split_4D_hyperface(
     hyperface: np.ndarray,
     hole_cuts: Tuple[np.ndarray, np.ndarray, np.ndarray],
 ):
-    vertices, edges, edge_norms = hole_cuts
-    vertices, remap = remove_redundant_vertices(vertices)
-    edges = remap_vertex_indexes(edges, remap)
+    try:
+        vertices, edges, edge_norms = hole_cuts
+        vertices, remap = remove_redundant_vertices(vertices)
+        edges = remap_vertex_indexes(edges, remap)
 
-    ##############################################
-    # Project holes to mesh
-    ##############################################
-    hyperface_vertices = mesh_vertices[hyperface]
-    O = hyperface_vertices[0:1].T
-    V = hyperface_vertices[1:].T - O
-    Vinv = la.pinv(V)
+        ##############################################
+        # Project holes to mesh
+        ##############################################
+        hyperface_vertices = mesh_vertices[hyperface]
+        O = hyperface_vertices[0:1].T
+        V = hyperface_vertices[1:].T - O
+        Vinv = la.pinv(V)
 
-    vertices = (Vinv @ (vertices.T - O)).T
-    hyperface_vertices = (Vinv @ (hyperface_vertices.T - O)).T
+        vertices = (Vinv @ (vertices.T - O)).T
+        hyperface_vertices = (Vinv @ (hyperface_vertices.T - O)).T
 
-    # NOTE: Calculate edge norm after transform
-    misaligned_norms = (Vinv @ edge_norms.T).T
-    new_edge_norms = []
-    for edge, misaligned_norm in zip(edges, misaligned_norms):
-        edge_verts = vertices[edge]
-        vecs = edge_verts[1:] - edge_verts[:1]
-        new_norm = la.null_space(vecs).T[0]
-        direction = np.dot(new_norm, misaligned_norm)
-        if direction < 0:
-            new_norm *= -1.0
-        new_edge_norms.append(new_norm)
+        # NOTE: Calculate edge norm after transform
+        misaligned_norms = (Vinv @ edge_norms.T).T
+        new_edge_norms = []
+        for edge, misaligned_norm in zip(edges, misaligned_norms):
+            edge_verts = vertices[edge]
+            vecs = edge_verts[1:] - edge_verts[:1]
+            new_norm = la.null_space(vecs).T[0]
+            direction = np.dot(new_norm, misaligned_norm)
+            if direction < 0:
+                new_norm *= -1.0
+            new_edge_norms.append(new_norm)
 
-    edge_norms = np.array(new_edge_norms)
+        edge_norms = np.array(new_edge_norms)
 
-    # print(vertices)
-    # NOTE: Remove edges coincide with hyperface's boundaries
-    edges_to_remove = np.zeros(edges.shape[0], dtype=bool)
-    for i, edge in enumerate(edges):
-        edge_vertices = vertices[edge]
-        is_zero = np.all(np.abs(edge_vertices) < TOL, axis=0)
-        one_sum = np.abs(np.sum(edge_vertices, axis=1) - 1) < TOL
-        edges_to_remove[i] = np.all(np.logical_or(np.any(is_zero), np.all(one_sum)))
+        # print(vertices)
+        # NOTE: Remove edges coincide with hyperface's boundaries
+        edges_to_remove = np.zeros(edges.shape[0], dtype=bool)
+        for i, edge in enumerate(edges):
+            edge_vertices = vertices[edge]
+            is_zero = np.all(np.abs(edge_vertices) < TOL, axis=0)
+            one_sum = np.abs(np.sum(edge_vertices, axis=1) - 1) < TOL
+            edges_to_remove[i] = np.all(np.logical_or(np.any(is_zero), np.all(one_sum)))
 
-    edges = edges[~edges_to_remove]
-    edge_norms = edge_norms[~edges_to_remove]
+        edges = edges[~edges_to_remove]
+        edge_norms = edge_norms[~edges_to_remove]
 
-    cut_edges_groups = generate_cut_groups(vertices, edges)
+        # Remove unused vertices
+        vertices, remap = remove_unused_vertices(vertices, edges)
+        edges = remap_vertex_indexes(edges, remap)
 
-    ##############################################
-    # Find connectable meshes
-    ##############################################
-    # permute edges of hyperface
-    hf_verts_neighbors = [
-        [None for _ in range(hyperface_vertices.shape[0])]
-        for _ in range(hyperface_vertices.shape[0])
-    ]
-    cut_hfe_neighbors = [
-        [
+        # Reorder edges
+        reorder_triangles_by_norm(vertices, edges, -edge_norms)
+
+        # Assign edge groups
+        cut_edges_groups = generate_cut_groups(vertices, edges)
+
+        # print("Draw")
+        # ax.clear()
+        # print(edges)
+        # plot(ax, hyperface_vertices, vertices, edges)
+        # plot(ax, hyperface_vertices, vertices, edges, edge_norms * 0.3)
+        # plt.show()
+        # plt.pause(1.0)
+
+        ##############################################
+        # Find connectable meshes
+        ##############################################
+        # permute edges of hyperface
+        hf_verts_neighbors = [
             [None for _ in range(hyperface_vertices.shape[0])]
             for _ in range(hyperface_vertices.shape[0])
         ]
-        for _ in range(len(cut_edges_groups))
-    ]
-    for bfvi in range(len(hyperface_vertices)):
-        for bfvj in range(bfvi + 1, len(hyperface_vertices)):
-            s = hyperface_vertices[bfvi]
-            e = hyperface_vertices[bfvj]
-            seg = e - s
+        cut_hfe_neighbors = [
+            [
+                [None for _ in range(hyperface_vertices.shape[0])]
+                for _ in range(hyperface_vertices.shape[0])
+            ]
+            for _ in range(len(cut_edges_groups))
+        ]
+        for bfvi in range(len(hyperface_vertices)):
+            for bfvj in range(bfvi + 1, len(hyperface_vertices)):
+                s = hyperface_vertices[bfvi]
+                e = hyperface_vertices[bfvj]
+                seg = e - s
 
-            # NOTE: find all hole meshes that has vertices on this segment
-            cut_vert_on_seg = []
-            for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
-                for cut_edge in cut_edges_ids:
-                    edge = edges[cut_edge]
-                    # print(edge)
-                    for vertex_idx in edge:
-                        vertex = vertices[vertex_idx]
-                        vs = vertex - s
+                # NOTE: find all hole meshes that has vertices on this segment
+                cut_vert_on_seg = []
+                for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
+                    for cut_edge in cut_edges_ids:
+                        edge = edges[cut_edge]
+                        # print(edge)
+                        for vertex_idx in edge:
+                            vertex = vertices[vertex_idx]
+                            vs = vertex - s
 
-                        len_seg = np.linalg.norm(seg)
-                        len_vs = np.linalg.norm(vs)
+                            len_seg = np.linalg.norm(seg)
+                            len_vs = np.linalg.norm(vs)
 
-                        cos = np.dot(seg, vs) / (len_seg * len_vs)
-                        # print(vertex)
-                        # print(cos)
-                        if np.abs(1 - cos) < TOL:
-                            norm_proj = np.dot(vs, edge_norms[cut_edge])
-                            direction = 1 if norm_proj > 0 else -1
-                            cut_vert_on_seg.append(
-                                (len_vs / len_seg, direction, cut_idx, vertex_idx)
-                            )
+                            cos = np.dot(seg, vs) / (len_seg * len_vs)
+                            # print(vertex)
+                            # print(cos)
+                            if np.abs(1 - cos) < TOL:
+                                norm_proj = np.dot(vs, edge_norms[cut_edge])
+                                direction = 1 if norm_proj > 0 else -1
+                                cut_vert_on_seg.append(
+                                    (len_vs / len_seg, direction, cut_idx, vertex_idx)
+                                )
 
-            # print(cut_vert_on_seg)
+                # print(cut_vert_on_seg)
 
-            # NOTE: Test
-            cut_vert_on_seg = sorted(cut_vert_on_seg, key=lambda x: x[0])
-            to_remove = [False for _ in range(len(cut_vert_on_seg))]
-            for i, (pos, dir, cut_idx, vertex_idx) in enumerate(cut_vert_on_seg[:-1]):
-                next_pos, next_dir, next_cut_idx, next_vertex_idx = cut_vert_on_seg[
-                    i + 1
-                ]
-                # Exactly on the same position
-                if vertex_idx == next_vertex_idx:
-                    if dir != next_dir:
-                        to_remove[i] = True
-                        to_remove[i + 1] = True
-                    else:
-                        to_remove[i] = True
-                    continue
-
-                if dir == 1 and next_dir == -1:
-                    cut_hfe_neighbors[cut_idx][bfvi][bfvj] = (
-                        next_cut_idx,
-                        next_vertex_idx,
-                    )
-                    # cut_hfe_neighbors[cut_idx][bfvj][bfvi] = (
-                    #     next_cut_idx,
-                    #     next_vertex_idx,
-                    # )
-
-                    if cut_idx == next_cut_idx:
-                        to_remove[i] = True
-                        to_remove[i + 1] = True
+                # NOTE: Test
+                cut_vert_on_seg = sorted(cut_vert_on_seg, key=lambda x: x[0])
+                to_remove = [False for _ in range(len(cut_vert_on_seg))]
+                for i, (pos, dir, cut_idx, vertex_idx) in enumerate(
+                    cut_vert_on_seg[:-1]
+                ):
+                    next_pos, next_dir, next_cut_idx, next_vertex_idx = cut_vert_on_seg[
+                        i + 1
+                    ]
+                    # Exactly on the same position
+                    if vertex_idx == next_vertex_idx:
+                        if dir != next_dir:
+                            to_remove[i] = True
+                            to_remove[i + 1] = True
+                        else:
+                            to_remove[i] = True
                         continue
 
-                    # cut_hfe_neighbors[next_cut_idx][bfvi][bfvj] = (
-                    #     cut_idx,
-                    #     vertex_idx,
-                    # )
-                    cut_hfe_neighbors[next_cut_idx][bfvj][bfvi] = (
-                        cut_idx,
-                        vertex_idx,
+                    if dir == 1 and next_dir == -1:
+                        cut_hfe_neighbors[cut_idx][bfvi][bfvj] = (
+                            next_cut_idx,
+                            next_vertex_idx,
+                            vertex_idx,
+                        )
+                        # cut_hfe_neighbors[cut_idx][bfvj][bfvi] = (
+                        #     next_cut_idx,
+                        #     next_vertex_idx,
+                        # )
+
+                        if cut_idx == next_cut_idx:
+                            to_remove[i] = True
+                            to_remove[i + 1] = True
+                            continue
+
+                        # cut_hfe_neighbors[next_cut_idx][bfvi][bfvj] = (
+                        #     cut_idx,
+                        #     vertex_idx,
+                        # )
+                        cut_hfe_neighbors[next_cut_idx][bfvj][bfvi] = (
+                            cut_idx,
+                            vertex_idx,
+                            next_vertex_idx,
+                        )
+
+                cut_vert_on_seg = [
+                    cut_vert_on_seg[i]
+                    for i in range(len(cut_vert_on_seg))
+                    if not to_remove[i]
+                ]
+                if len(cut_vert_on_seg) == 0:
+                    hf_verts_neighbors[bfvi][bfvj] = (-1, -1)  # pyright: ignore
+                    # hf_verts_neighbors[bfvj][bfvi] = (-1, -1)  # pyright: ignore
+                    continue
+
+                if cut_vert_on_seg[0][1] == -1:
+                    hf_verts_neighbors[bfvi][bfvj] = (  # pyright: ignore
+                        cut_vert_on_seg[0][2],
+                        cut_vert_on_seg[0][3],
+                    )
+                if cut_vert_on_seg[-1][1] == 1:
+                    hf_verts_neighbors[bfvj][bfvi] = (  # pyright: ignore
+                        cut_vert_on_seg[-1][2],
+                        cut_vert_on_seg[-1][3],
                     )
 
-            cut_vert_on_seg = [
-                cut_vert_on_seg[i]
-                for i in range(len(cut_vert_on_seg))
-                if not to_remove[i]
+        # print(vertices)
+        # print(edges)
+        # print(edge_norms)
+
+        # print(cut_hfe_neighbors)
+        # print(hf_verts_neighbors)
+
+        # plot(ax, hyperface_vertices, vertices, edges)
+
+        bv_isolated = np.array(
+            [
+                all([neighbor is None or neighbor[0] < 0 for neighbor in neighbors])
+                for neighbors in hf_verts_neighbors
             ]
-            if len(cut_vert_on_seg) == 0:
-                hf_verts_neighbors[bfvi][bfvj] = (-1, -1)  # pyright: ignore
-                hf_verts_neighbors[bfvj][bfvi] = (-1, -1)  # pyright: ignore
-                continue
+        )
+        bv_vertex_ids = np.arange(start=vertices.shape[0], stop=vertices.shape[0] + 4)
+        num_external_vertices = vertices.shape[0]
+        vertices = np.vstack((vertices, hyperface_vertices))
 
-            if cut_vert_on_seg[0][1] == -1:
-                hf_verts_neighbors[bfvi][bfvj] = (  # pyright: ignore
-                    cut_vert_on_seg[0][2],
-                    cut_vert_on_seg[0][3],
-                )
-            if cut_vert_on_seg[-1][1] == 1:
-                hf_verts_neighbors[bfvj][bfvi] = (  # pyright: ignore
-                    cut_vert_on_seg[-1][2],
-                    cut_vert_on_seg[-1][3],
-                )
-
-    # print(vertices)
-    # print(edges)
-    # print(edge_norms)
-    #
-    # print(cut_hfe_neighbors)
-    # print(hf_verts_neighbors)
-    #
-    # plot(ax, hyperface_vertices, vertices, edges)
-
-    bv_isolated = np.array(
-        [
-            all([neighbor is None or neighbor[0] < 0 for neighbor in neighbors])
-            for neighbors in hf_verts_neighbors
-        ]
-    )
-    bv_vertex_ids = np.arange(start=vertices.shape[0], stop=vertices.shape[0] + 4)
-    vertices = np.vstack((vertices, hyperface_vertices))
-
-    for i in range(len(hyperface_vertices)):
-        bf_vert_ids = [j for j in range(len(hyperface_vertices)) if j != i]
-        bf_cut_groups = [-1 for _ in range(len(cut_edges_groups))]
-        bf_bv_groups = [-1 for _ in range(len(bf_vert_ids))]
-        group_count = 0
-        groups = []
-        for bfvi_id, bfvi in enumerate(bf_vert_ids):
-            if bv_isolated[bfvi]:
-                continue
-
-            if bf_bv_groups[bfvi_id] < 0:
-                bf_bv_groups[bfvi_id] = group_count
-                groups.append((set(), set()))
-                groups[group_count][0].add(bfvi)
-                group_count += 1
-
-            for bfvj_id, bfvj in enumerate(bf_vert_ids):
-                if bfvi == bfvj:
-                    continue
-                neighbor = hf_verts_neighbors[bfvi][bfvj]
-                if neighbor is None:
-                    continue
-
-                current_group = bf_bv_groups[bfvi_id]
-                if neighbor[0] < 0:
-                    bf_bv_groups[bfvj_id] = current_group
-                    groups[current_group][0].add(bfvj)
-                else:
-                    bf_cut_groups[neighbor[0]] = current_group
-                    groups[current_group][1].add(neighbor[0])
-
-        # NOTE: cut pairs
-        for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
-            if all(
-                [
-                    all([cut_hfe_neighbors[cut_idx][i][j] is None for j in bf_vert_ids])
-                    for i in bf_vert_ids
-                ]
-            ):
-                continue
-
-            if bf_cut_groups[cut_idx] < 0:
-                bf_cut_groups[cut_idx] = group_count
-                groups.append((set(), set()))
-                groups[group_count][1].add(cut_idx)
-                group_count += 1
-
+        for i in range(len(hyperface_vertices)):
+            bf_vert_ids = [j for j in range(len(hyperface_vertices)) if j != i]
+            bf_cut_groups = [-1 for _ in range(len(cut_edges_groups))]
+            bf_bv_groups = [-1 for _ in range(len(bf_vert_ids))]
+            group_count = 0
+            groups = []
             for bfvi_id, bfvi in enumerate(bf_vert_ids):
+                if bv_isolated[bfvi]:
+                    continue
+
+                if bf_bv_groups[bfvi_id] < 0:
+                    bf_bv_groups[bfvi_id] = group_count
+                    groups.append((set(), set()))
+                    groups[group_count][0].add(bfvi)
+                    group_count += 1
+
                 for bfvj_id, bfvj in enumerate(bf_vert_ids):
                     if bfvi == bfvj:
                         continue
-
-                    neighbor = cut_hfe_neighbors[cut_idx][bfvi][bfvj]
-                    if neighbor is None:
-                        continue
-
-                    current_group = bf_cut_groups[cut_idx]
-                    bf_cut_groups[neighbor[0]] = current_group
-                    groups[current_group][1].add(neighbor[0])
-
-        # NOTE: find cut's points on this boundary face
-        bf_vertices = hyperface_vertices[bf_vert_ids]
-        bfO = bf_vertices[0:1].T
-        bfV = bf_vertices[1:].T - bfO
-        bfV_inv = la.pinv(bfV)
-
-        cut_bf_vertices = (bfV_inv @ (vertices.T - bfO)).T
-
-        # WARNING: Only valid for 2D case now
-        # To support 3D case, need to connenct bv with vertices that has only
-        # one non-zero entry in the projection
-        # The direction of 2D boundary of a 3D face is also needed
-        cut_on_bf_groups = [[] for _ in range(len(cut_edges_groups))]
-        for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
-            for cut_edge in cut_edges_ids:
-                edge = edges[cut_edge]
-                verts = vertices[edge]
-                verts_proj = cut_bf_vertices[edge]
-                diff = np.linalg.norm(verts - (bfV @ verts_proj.T + bfO).T, axis=1)
-                is_verts_on_face = diff < TOL
-
-                # has_component = (verts_proj > TOL) * 1
-                # on_bf_edge = np.logical_and(
-                #     np.sum(has_component, axis=1) == 1, is_verts_on_face
-                # )
-                # print(on_bf_edge)
-
-                # Add segment to new cut
-                if np.sum(is_verts_on_face * 1) == 2:
-                    cut_on_bf_groups[cut_idx].append(
-                        edge[np.where(is_verts_on_face)].tolist()
-                    )
-
-        bf_norm = la.null_space(bfV.T).T
-        bf_norm /= np.linalg.norm(bf_norm)
-
-        if np.dot(bf_norm, hyperface_vertices[i] - bf_vertices[0]) < 0:
-            bf_norm *= -1
-
-        # print(bf_cut_groups)
-        # print(bf_bv_groups)
-        # print(groups)
-        # print(cut_hfe_neighbors)
-
-        # TODO: fix holes on boundary face in 3D
-        for group in groups:
-            new_cut_segs = []
-            for cut_idx in group[1]:
-                new_cut_segs.extend(cut_on_bf_groups[cut_idx])
-
-                for bfvi_id in range(len(bf_vert_ids)):
-                    bfvi = bf_vert_ids[bfvi_id]
-                    for bfvj_id in range(bfvi_id + 1, len(bf_vert_ids)):
-                        bfvj = bf_vert_ids[bfvj_id]
-                        neighbor = cut_hfe_neighbors[cut_idx][bfvi][bfvj]
-                        if neighbor is None:
-                            continue
-
-                        if neighbor[0] in group[1]:
-                            vert_from = cut_hfe_neighbors[neighbor[0]][bfvj][bfvi][1]
-                            new_cut_segs.append([vert_from, neighbor[1]])
-
-            for bfvi_id in group[0]:
-                bfvi = bf_vert_ids[bfvi_id]
-                for bfvj_id in range(bfvi_id + 1, len(bf_vert_ids)):
-                    bfvj = bf_vert_ids[bfvj_id]
                     neighbor = hf_verts_neighbors[bfvi][bfvj]
                     if neighbor is None:
                         continue
 
-                    if neighbor[0] < 0 and bfvj in group[0]:
-                        vert_from = bv_vertex_ids[bfvi]
-                        vert_to = bv_vertex_ids[bfvj]
-                        new_cut_segs.append([vert_from, vert_to])
+                    current_group = bf_bv_groups[bfvi_id]
+                    if neighbor[0] < 0:
+                        bf_bv_groups[bfvj_id] = current_group
+                        groups[current_group][0].add(bfvj)
+                    else:
+                        bf_cut_groups[neighbor[0]] = current_group
+                        groups[current_group][1].add(neighbor[0])
 
-            if len(new_cut_segs) > 0:
-                # TODO: Reuse MeshInfo
-                cut_segs = np.array(new_cut_segs)
-                verts, map_to, map_back = extract_vertices_from_edges(
-                    cut_bf_vertices, cut_segs
-                )
-                cut_segs = map_to(cut_segs)
-                # if verts.shape[0] < 3:
-                #     print(vertices)
-                #     print(edges)
-                #     print(i)
-                #     print(cut_edges_groups)
-                #     print(cut_on_bf_groups)
-                #     # print(groups)
-                #     # print(new_cut_segs)
-                #     print(hf_verts_neighbors)
-                #     print(cut_hfe_neighbors)
-                #     plot(ax, hyperface_vertices, vertices, edges)
-                #     plt.show()
-                _, cut_edges = triangulate(verts, cut_segs)
-                cut_edges = map_back(cut_edges)
+            # NOTE: cut pairs
+            for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
+                if all(
+                    [
+                        all(
+                            [
+                                cut_hfe_neighbors[cut_idx][i][j] is None
+                                for j in bf_vert_ids
+                            ]
+                        )
+                        for i in bf_vert_ids
+                    ]
+                ):
+                    continue
 
-                edges = np.vstack((edges, cut_edges))
-                edge_norms = np.vstack((edge_norms, bf_norm))
+                if bf_cut_groups[cut_idx] < 0:
+                    bf_cut_groups[cut_idx] = group_count
+                    groups.append((set(), set()))
+                    groups[group_count][1].add(cut_idx)
+                    group_count += 1
 
-    edges = np.sort(edges, axis=-1)
-    edges = np.sort(edges, axis=0)
-    edges = np.unique(edges, axis=0)
-    cut_edges_groups = generate_cut_groups(vertices, edges)
+                for bfvi_id, bfvi in enumerate(bf_vert_ids):
+                    for bfvj_id, bfvj in enumerate(bf_vert_ids):
+                        if bfvi == bfvj:
+                            continue
 
-    new_hyperfaces = np.empty((0, 4), dtype=int)
-    for cut_edges_ids in cut_edges_groups:
-        cut_edges = edges[cut_edges_ids]
-        group_vertices, map_to, map_back = extract_vertices_from_edges(
-            vertices, cut_edges
-        )
+                        neighbor = cut_hfe_neighbors[cut_idx][bfvi][bfvj]
+                        if neighbor is None:
+                            continue
 
-        group_vertices = np.array(group_vertices)
-        group_edges = map_to(cut_edges)
+                        current_group = bf_cut_groups[cut_idx]
+                        bf_cut_groups[neighbor[0]] = current_group
+                        groups[current_group][1].add(neighbor[0])
 
-        tetras = tetrahedralize(group_vertices, group_edges)
-        tetras = map_back(tetras)
+            # NOTE: find cut's points on this boundary face
+            bf_vertices = hyperface_vertices[bf_vert_ids]
+            bfO = bf_vertices[0:1].T
+            bfV = bf_vertices[1:].T - bfO
+            bfV_inv = la.pinv(bfV)
 
-        new_hyperfaces = np.vstack((new_hyperfaces, tetras))
+            cut_bf_vertices = (bfV_inv @ (vertices.T - bfO)).T
 
-    new_hyperfaces += mesh_vertices.shape[0]
-    new_hyperfaces[-4:] = hyperface
+            # WARNING: Only valid for 2D case now
+            # To support 3D case, need to connenct bv with vertices that has only
+            # one non-zero entry in the projection
+            # The direction of 2D boundary of a 3D face is also needed
+            cut_on_bf_groups = [[] for _ in range(len(cut_edges_groups))]
+            for cut_idx, cut_edges_ids in enumerate(cut_edges_groups):
+                for cut_edge in cut_edges_ids:
+                    edge = edges[cut_edge]
+                    verts = vertices[edge]
+                    verts_proj = cut_bf_vertices[edge]
+                    diff = np.linalg.norm(verts - (bfV @ verts_proj.T + bfO).T, axis=1)
+                    is_verts_on_face = diff < TOL
 
-    # print(new_hyperfaces)
-    vertices = (V @ vertices.T + O).T
+                    # has_component = (verts_proj > TOL) * 1
+                    # on_bf_edge = np.logical_and(
+                    #     np.sum(has_component, axis=1) == 1, is_verts_on_face
+                    # )
+                    # print(on_bf_edge)
 
-    return vertices, new_hyperfaces
+                    # Add segment to new cut
+                    if np.sum(is_verts_on_face * 1) == 2:
+                        cut_on_bf_groups[cut_idx].append(
+                            edge[np.where(is_verts_on_face)].tolist()
+                        )
+
+            bf_norm = la.null_space(bfV.T).T
+            bf_norm /= np.linalg.norm(bf_norm)
+
+            if np.dot(bf_norm, hyperface_vertices[i] - bf_vertices[0]) < 0:
+                bf_norm *= -1
+
+            # print(bf_cut_groups)
+            # print(bf_bv_groups)
+            # print(groups)
+            # print(cut_hfe_neighbors)
+            # print(cut_on_bf_groups)
+
+            # TODO: fix holes on boundary face in 3D
+            for group in groups:
+                # print(group)
+                if len(group[1]) == 0:
+                    continue
+
+                new_cut_segs = []
+                for cut_idx in group[1]:
+                    new_cut_segs.extend(cut_on_bf_groups[cut_idx])
+
+                    for bfvi_id in range(len(bf_vert_ids)):
+                        bfvi = bf_vert_ids[bfvi_id]
+                        for bfvj_id in range(bfvi_id + 1, len(bf_vert_ids)):
+                            bfvj = bf_vert_ids[bfvj_id]
+                            neighbor = cut_hfe_neighbors[cut_idx][bfvi][bfvj]
+                            # if neighbor is None or cut_idx == neighbor[0]:
+                            if neighbor is None:
+                                continue
+
+                            if neighbor[0] in group[1]:
+                                new_cut_segs.append([neighbor[2], neighbor[1]])
+
+                for bfvi in group[0]:
+                    for bfvj in bf_vert_ids:
+                        if bfvj == bfvi:
+                            continue
+
+                        neighbor = hf_verts_neighbors[bfvi][bfvj]
+                        if neighbor is None:
+                            continue
+
+                        if neighbor[0] < 0 and bfvj in group[0]:
+                            vert_from = bv_vertex_ids[bfvi]
+                            vert_to = bv_vertex_ids[bfvj]
+                            new_cut_segs.append([vert_from, vert_to])
+
+                        if neighbor[0] >= 0:
+                            cut_idx = neighbor[0]
+                            if cut_idx in group[1]:
+                                vert_from  = bv_vertex_ids[bfvi]
+                                vert_to = neighbor[1]
+                                new_cut_segs.append([vert_from, vert_to])
+
+                if len(new_cut_segs) > 0:
+                    # print(new_cut_segs)
+                    # TODO: Reuse MeshInfo
+                    cut_segs = np.array(new_cut_segs)
+                    verts, map_to, map_back = extract_vertices_from_edges(
+                        cut_bf_vertices, cut_segs
+                    )
+                    cut_segs = map_to(cut_segs)
+                    cut_segs = np.sort(cut_segs, axis=-1)
+                    cut_segs = np.unique(cut_segs, axis=0)
+                    # print("Start triangulate")
+                    # if np.sum(np.abs(cut_segs[:4].flatten() - np.array([0, 1, 0, 8, 1, 2, 1, 3]))) == 0:
+                    #     # plot(ax, hyperface_vertices, vertices, edges)
+                    #     plot_2D_polygon(ax, verts, cut_segs)
+                    #     plt.show()
+                    #     print(verts)
+                    #     print(cut_segs)
+
+                    _, cut_edges = triangulate(verts, cut_segs)
+                    # print("End triangulate")
+                    cut_edges = map_back(cut_edges)
+
+                    edges = np.vstack((edges, cut_edges))
+                    edge_norms = np.vstack((edge_norms, bf_norm))
+
+        edges = np.sort(edges, axis=-1)
+        edges = np.sort(edges, axis=0)
+        edges = np.unique(edges, axis=0)
+        cut_edges_groups = generate_cut_groups(vertices, edges)
+
+        # print(edges)
+
+        new_hyperfaces = np.empty((0, 4), dtype=int)
+        for cut_edges_ids in cut_edges_groups:
+            cut_edges = edges[cut_edges_ids]
+            group_vertices, map_to, map_back = extract_vertices_from_edges(
+                vertices, cut_edges
+            )
+
+            group_vertices = np.array(group_vertices)
+            group_edges = map_to(cut_edges)
+
+            # print("Start tetrahedralize")
+            tetras = tetrahedralize(group_vertices, group_edges)
+            # print("End tetrahedralize")
+            tetras = map_back(tetras)
+
+            new_hyperfaces = np.vstack((new_hyperfaces, tetras))
+
+        # plot(ax, hyperface_vertices, vertices, new_hyperfaces)
+        # plt.show()
+
+        # Only keep index of hyperface vertices
+        new_hyperfaces[new_hyperfaces < num_external_vertices] += mesh_vertices.shape[0]
+
+        # print(new_hyperfaces)
+        vertices = vertices[:num_external_vertices]
+        vertices = (V @ vertices.T + O).T
+
+        return vertices, new_hyperfaces
+
+    except Exception as e:
+        # plot(ax, hyperface_vertices, vertices, edges)
+        # plt.show()
+        # raise e
+        return vertices, np.empty((0, 4), dtype=int)
 
 
 def generate_cut_groups(vertices: np.ndarray, edges: np.ndarray):

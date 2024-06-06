@@ -22,3 +22,9 @@ def plot_3D_mesh(ax, mesh: Mesh, plot_normal=False, color="blue"):
                 mesh.face_normals[idx][2] * 0.2,
                 color="red",
             )
+
+
+def plot_3D_polygon(ax, vertices, segs, color="blue"):
+    for seg in segs:
+        verts = vertices[seg]
+        ax.plot(verts[:, 0], verts[:, 1], verts[:, 2], color=color)
