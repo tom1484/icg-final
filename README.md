@@ -21,11 +21,11 @@ python -m mesh.tests.generate_4D ./mesh/result/sculpt_4D.obj
 python -m mesh.tests.render_4D ./mesh/result/sculpt_4D.obj ./mesh/result/sculpt_4D.gif
 ```
 
-### Occupancy approach
+### Point cloud approach
 
 Refer to `occupancy/README.md` for more details.
 
 ## Division of work
 
 - **Mesh approach**: Chu-Rong Chen (tom1484)
-- **Occupancy approach**: Chun-Mao Lai (Mecoli1219)
+- **Point cloud approach**: Chun-Mao Lai (Mecoli1219)
