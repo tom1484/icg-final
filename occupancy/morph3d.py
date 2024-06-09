@@ -1,16 +1,14 @@
 import numpy as np
-import cv2
-import scipy.ndimage
 from PIL import Image
 import tqdm
 from morph2d import record2DVideo, getSettingList2D, getView2dfrom3d
-
+import argparse
 
 def getShape3d(type, size=100, imgSize=200, skeleton=False, plot=False):
     if type == 0:
         # rectangle
         shape = np.zeros((size, size, size))
-        border = int(size * 0.2)
+        border = 0
         border2 = border + 2
         shape[
             border : size - border, border : size - border, border : size - border
@@ -76,10 +74,10 @@ def getShape3d(type, size=100, imgSize=200, skeleton=False, plot=False):
 
             # (0, 0, 0), (size * 2//3, size//2, size)
             shape2 = (
-                (2 * Y - Z >= 0)
-                & (2 * Y - Z < 4)
-                & (X * 3 / 2 - Z >= 0)
-                & (X * 3 / 2 - Z < 2)
+                (2 * Y - Z >= -4)
+                & (2 * Y - Z <= 0)
+                & (X * 3 / 2 - Z >= -2)
+                & (X * 3 / 2 - Z < 0)
             )
             shape2 = shape2.astype(np.int64) * 255
             shape = np.maximum(shape, shape2)
@@ -127,7 +125,7 @@ def getShape3d(type, size=100, imgSize=200, skeleton=False, plot=False):
             record2DVideo(res, setting_list, f"./shapes/3d/shape{type}_3d_skeleton.gif")
         else:
             record2DVideo(res, setting_list, f"./shapes/3d/shape{type}_3d.gif")
-
+    res = res.astype(np.uint8)
     return res
 
 
@@ -221,63 +219,97 @@ def getSettingList2D45():
         setting_list.append((angle + 45, angle + 45, angle))
     return setting_list
 
-def myRotate(model, angle, axes=(0,1)):
+
+def myRotate(model, angle, axes=(0,1), divide=2):
     angle = np.radians(angle)
     matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-    X, Y = np.meshgrid(np.arange(model.shape[axes[1]]), np.arange(model.shape[axes[0]]))
-    X = X - model.shape[axes[1]] // 2
-    Y = Y - model.shape[axes[0]] // 2
+    result = np.zeros(model.shape, dtype=model.dtype)
 
-    target_axis = np.stack([X, Y], axis=-1)
-    inverse_axis = np.linalg.inv(matrix)
-    index_axis = target_axis @ inverse_axis
-    index_X, index_Y = index_axis[:, :, 0], index_axis[:, :, 1]
-    index_X = index_X + model.shape[axes[1]] // 2
-    index_Y = index_Y + model.shape[axes[0]] // 2
-    index_X = np.clip(index_X, 0, model.shape[axes[1]] - 1)
-    index_Y = np.clip(index_Y, 0, model.shape[axes[0]] - 1)
-    index_X = index_X.astype(np.int64)
-    index_Y = index_Y.astype(np.int64)
+    x_splits = np.split(np.arange(model.shape[axes[1]]), divide)
+    y_splits = np.split(np.arange(model.shape[axes[0]]), divide)
+    for x_range in x_splits:
+        for y_range in y_splits:
+            X, Y = np.meshgrid(x_range, y_range)
+            center_X = X - model.shape[axes[1]] // 2
+            center_Y = Y - model.shape[axes[0]] // 2
 
-    shift_model = np.moveaxis(model, axes, (0, 1))
-    result = shift_model[index_Y, index_X]
-    result = np.moveaxis(result, (0, 1), axes)
+            target_axis = np.stack([center_X, center_Y], axis=-1)
+            inverse_axis = np.linalg.inv(matrix)
+            index_axis = target_axis @ inverse_axis
+            index_X, index_Y = index_axis[:, :, 0], index_axis[:, :, 1]
+            index_X = index_X + model.shape[axes[1]] // 2
+            index_Y = index_Y + model.shape[axes[0]] // 2
+            index_X = np.clip(index_X, 0, model.shape[axes[1]] - 1)
+            index_Y = np.clip(index_Y, 0, model.shape[axes[0]] - 1)
+            index_X = index_X.astype(np.int64)
+            index_Y = index_Y.astype(np.int64)
+
+            # shift_model = np.moveaxis(model, axes, (0, 1))
+            if axes == (0, 1):
+                result[Y, X, :, :] = model[index_Y, index_X, :, :]
+            elif axes == (1, 2):
+                result[:, Y, X, :] = model[:, index_Y, index_X, :]
+            elif axes == (0, 2):
+                result[Y, :, X, :] = model[index_Y, :, index_X, :]
+            elif axes == (2, 3):
+                result[:, :, Y, X] = model[:, :, index_Y, index_X]
+            elif axes == (0, 3):
+                result[Y, :, :, X] = model[index_Y, :, :, index_X]
+            elif axes == (1, 3):
+                result[:, Y, :, X] = model[:, index_Y, :, index_X]
+            else:
+                raise ValueError("Invalid axes")
     return result
 
 if __name__ == "__main__":
-    size = 80
-    imgSize = 100
+
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--imgSize", type=int, default=100)
+    argparser.add_argument("--shape1", type=int, default=0)
+    argparser.add_argument("--shape2", type=int, default=2)
+
+    args = argparser.parse_args()
+
+    imgSize = args.imgSize
+    size = imgSize // 2
+    postfix = f"{args.shape1}{args.shape2}_{imgSize}"
     b_r = int((imgSize - size) / 2)
     shape0 = getShape3d(0, size, imgSize, True, False)
     shape1 = getShape3d(1, size, imgSize, True, False)
-    shape2 = getShape3d(2, size, imgSize, True, False)
-    shape2 = np.transpose(shape2, (1, 2, 0))
-    shape3 = getShape3d(3, size, imgSize, True, False)
+    shape2 = getShape3d(2, size, imgSize, True, True)
+    shape3 = getShape3d(3, size, imgSize, True, True)
+    shapeList = {
+        0: shape0,
+        1: shape1,
+        2: shape2,
+        3: shape3,
+    }
+    # shape2 = np.transpose(shape2, (1, 2, 0))
 
     mesh4d = np.zeros((imgSize, imgSize, imgSize, imgSize))
     mesh4d[b_r : b_r + size, b_r : b_r + size, b_r : b_r + size, b_r : b_r + size] = 255
-    mesh4d = crop3dfrom4d(mesh4d, shape0, 0)
-    mesh4d = crop3dfrom4d(mesh4d, shape2, 1)
+    mesh4d = crop3dfrom4d(mesh4d, shapeList[args.shape1], 0)
+    mesh4d = crop3dfrom4d(mesh4d, shapeList[args.shape2], 2)
     # mesh4d = crop3dfrom4d(mesh4d, shape2, 2)
 
     mesh3d1 = getMesh3dfrom4d(mesh4d, 0, 0, 0, 0, 0, 0)
-    frames1 = record2DVideo(mesh3d1, getSettingList2D(), f"./output/3d/mesh3d1.gif")
+    frames1 = record2DVideo(mesh3d1, getSettingList2D45(), f"./output/3d/mesh3d1.gif")
     mesh3d2 = getMesh3dfrom4d(mesh4d, 90, 0, 0, 0, 0, 0)
-    frames2 = record2DVideo(mesh3d2, getSettingList2D(), f"./output/3d/mesh3d2.gif")
+    frames2 = record2DVideo(mesh3d2, getSettingList2D45(), f"./output/3d/mesh3d2.gif")
     mesh3d3 = getMesh3dfrom4d(mesh4d, 45, 0, 0, 0, 0, 0)
     record2DVideo(mesh3d3, getSettingList2D(), f"./output/3d/mesh3d3.gif")
 
-    # frames12 = record3DVideo(
-    #     mesh4d,
-    #     getTransferingSettingList3D(),
-    #     f"./output/3d/3d_shape23_45.gif",
-    #     yaw=45,
-    #     pitch=45,
-    #     roll=0,
-    # )
+    frames12 = record3DVideo(
+        mesh4d,
+        getTransferingSettingList3D(),
+        f"./output/3d/3d_shape{postfix}_45.gif",
+        yaw=45,
+        pitch=45,
+        roll=0,
+    )
 
-    # frames21 = frames12[::-1]
+    frames21 = frames12[::-1]
 
-    # concatFrames2Gif(
-    #     frames1, frames12, frames2, frames21, path=f"./output/3d/transferring_02.gif"
-    # )
+    concatFrames2Gif(
+        frames1, frames12, frames2, frames21, path=f"./output/3d/transferring_{postfix}.gif"
+    )

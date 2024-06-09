@@ -119,12 +119,25 @@ class Mesh:
         # TODO: Update Face Normal
         hyperfaces = np.ndarray((0, 3), dtype=int)
         face_normals = np.ndarray((0, 3), dtype=float)
+        hash_map = {}
         patterns = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]
         for face_id, face in enumerate(self.hyperfaces):
             norm_projected = self.face_normals[face_id][:-1]
             for pattern in patterns:
                 new_face = face[pattern]
+        #         hash_key = tuple(sorted(new_face))
+        #         if hash_key in hash_map:
+        #             continue
+        #         else:
+        #             hash_map[hash_key] = (new_face, norm_projected)
+        
+        # valid_keys = self.remove_redundant_vertices([key for key in hash_map.keys()])
+        # for key in valid_keys:
+        #     new_face, norm_projected = hash_map[key]
+        # # for new_face, norm_projected in hash_map.values():
                 face_vertices = new_vertices[new_face]
+                # if not self.is_valid_vertices(face_vertices):
+                #     continue
                 norm = la.null_space(
                     np.vstack(
                         (
@@ -139,6 +152,51 @@ class Mesh:
 
         # breakpoint()
         return Mesh(new_vertices, hyperfaces, face_normals)
+
+    def is_valid_vertices(self, vertices):
+        for i in range(vertices.shape[0]):
+            for j in range(i + 1, vertices.shape[0]):
+                if np.linalg.norm(vertices[i] - vertices[j]) < TOL:
+                    return False
+        return True
+    
+    def remove_redundant_vertices(self, vertices):
+        ans = []
+        while len(vertices) > 0:
+            v = vertices.pop()
+            ans.append(v)
+            for v2 in vertices:
+                share_data = self.shape_share_edges(v, v2)
+                if share_data is not None:
+                    share_edges, non_share_edges = share_data
+                    for non_share_edge in non_share_edges:
+                        remove_target = []
+                        remove_target.extend(share_edges)
+                        remove_target.append(non_share_edge)
+                        remove_target = tuple(sorted(remove_target))
+                        if remove_target in vertices:
+                            vertices.remove(remove_target)
+        return ans
+                
+    def shape_share_edges(self, v1, v2):
+        i1 = 0
+        i2 = 0
+        non_share_idx = []
+        share_idx = []
+        while i1 < len(v1) and i2 < len(v2):
+            if v1[i1] == v2[i2]:
+                share_idx.append(v1[i1])
+                i1 += 1
+                i2 += 1
+            elif v1[i1] < v2[i2]:
+                non_share_idx.append(v1[i1])
+                i1 += 1
+            else:
+                non_share_idx.append(v2[i2])
+                i2 += 1
+        if len(share_idx) == 2:
+            return share_idx, non_share_idx
+        return None
 
 
 def split_hyperface(

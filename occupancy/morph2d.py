@@ -1,8 +1,8 @@
 import numpy as np
 import cv2
-import scipy.ndimage
 from PIL import Image
 import tqdm
+import argparse
 
 DEBUG = True
 
@@ -89,39 +89,58 @@ def record2DVideo(cube, setting_list, path_name, fps=10):
 
     return frames
 
-def myRotate(model, angle, axes=(0,1)):
+
+def myRotate(model, angle, axes=(0,1), divide=1):
     angle = np.radians(angle)
     matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-    X, Y = np.meshgrid(np.arange(model.shape[axes[1]]), np.arange(model.shape[axes[0]]))
-    X = X - model.shape[axes[1]] // 2
-    Y = Y - model.shape[axes[0]] // 2
+    result = np.zeros(model.shape, dtype=model.dtype)
 
-    target_axis = np.stack([X, Y], axis=-1)
-    inverse_axis = np.linalg.inv(matrix)
-    index_axis = target_axis @ inverse_axis
-    index_X, index_Y = index_axis[:, :, 0], index_axis[:, :, 1]
-    index_X = index_X + model.shape[axes[1]] // 2
-    index_Y = index_Y + model.shape[axes[0]] // 2
-    index_X = np.clip(index_X, 0, model.shape[axes[1]] - 1)
-    index_Y = np.clip(index_Y, 0, model.shape[axes[0]] - 1)
-    index_X = index_X.astype(np.int64)
-    index_Y = index_Y.astype(np.int64)
+    x_splits = np.split(np.arange(model.shape[axes[1]]), divide)
+    y_splits = np.split(np.arange(model.shape[axes[0]]), divide)
+    for x_range in x_splits:
+        for y_range in y_splits:
+            X, Y = np.meshgrid(x_range, y_range)
+            center_X = X - model.shape[axes[1]] // 2
+            center_Y = Y - model.shape[axes[0]] // 2
 
-    shift_model = np.moveaxis(model, axes, (0, 1))
-    result = shift_model[index_Y, index_X]
-    result = np.moveaxis(result, (0, 1), axes)
+            target_axis = np.stack([center_X, center_Y], axis=-1)
+            inverse_axis = np.linalg.inv(matrix)
+            index_axis = target_axis @ inverse_axis
+            index_X, index_Y = index_axis[:, :, 0], index_axis[:, :, 1]
+            index_X = index_X + model.shape[axes[1]] // 2
+            index_Y = index_Y + model.shape[axes[0]] // 2
+            index_X = np.clip(index_X, 0, model.shape[axes[1]] - 1)
+            index_Y = np.clip(index_Y, 0, model.shape[axes[0]] - 1)
+            index_X = index_X.astype(np.int64)
+            index_Y = index_Y.astype(np.int64)
+
+            # shift_model = np.moveaxis(model, axes, (0, 1))
+            if axes == (0, 1):
+                result[Y, X, :] = model[index_Y, index_X, :]
+            elif axes == (1, 2):
+                result[:, Y, X] = model[:, index_Y, index_X]
+            elif axes == (0, 2):
+                result[Y, :, X] = model[index_Y, :, index_X]
+            else:
+                raise ValueError("Invalid axes")
     return result
 
 if __name__ == "__main__":
-    size = 40
-    imgSize = 80
+
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--imgSize", type=int, default=160)
+
+    args = argparser.parse_args()
+
+    imgSize = args.imgSize
+    size = imgSize // 2
     # 50, 80 | 80, 100
     b_r = int((imgSize - size) / 2)
     cube = np.zeros((imgSize, imgSize, imgSize))
     # cube = np.ones((size, size, size)) * 255
     cube[b_r : b_r + size, b_r : b_r + size, b_r : b_r + size] = 255
     shape1 = getShape2d(0, size, imgSize, True)
-    shape2 = getShape2d(1, size, imgSize, True)
+    shape2 = getShape2d(1, size + 6, imgSize, True)
     cube = crop2dfrom3d(cube, shape1, 0)
     cube = crop2dfrom3d(cube, shape2, 2)
 
@@ -136,4 +155,4 @@ if __name__ == "__main__":
     cv2.imwrite("view3.png", view3)
 
     setting_list = getSettingList2D()
-    record2DVideo(cube, setting_list, "./output/2d/2d_50.gif")
+    record2DVideo(cube, setting_list, f"./output/2d/2d_{imgSize}.gif")

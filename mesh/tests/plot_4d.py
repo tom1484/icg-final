@@ -74,9 +74,9 @@ def init_sculpt():
 sculpt = init_sculpt()
 sculpt3d = sculpt.project_3d_from_4d(
     [
-        (np.pi / 4, 0, 3),
-        (np.pi / 4, 1, 3),
-        (np.pi / 4, 2, 3),
+        # (np.pi / 4, 0, 3),
+        # (np.pi / 4, 1, 3),
+        # (np.pi / 4, 2, 3),
         # (np.pi / 4, 0, 1),
         # (np.pi / 4, 0, 2),
         # (np.pi / 4, 1, 2),

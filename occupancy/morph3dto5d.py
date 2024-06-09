@@ -1,9 +1,8 @@
 import numpy as np
-import cv2
-import scipy.ndimage
 from PIL import Image
 import tqdm
 from morph2d import record2DVideo, getSettingList2D, getView2dfrom3d
+import argparse
 
 
 def getShape3d(type, size=100, imgSize=200, skeleton=False, plot=False):
@@ -127,7 +126,7 @@ def getShape3d(type, size=100, imgSize=200, skeleton=False, plot=False):
             record2DVideo(res, setting_list, f"./shapes/3d/shape{type}_3d_skeleton.gif")
         else:
             record2DVideo(res, setting_list, f"./shapes/3d/shape{type}_3d.gif")
-
+    res = res.astype(np.uint8)
     return res
 
 
@@ -137,12 +136,12 @@ def crop3dfrom5d(cube, shape, apply_dim):
     return cube
 
 
-def getMesh3dfrom5d(mesh4d, turning_list):
+def getMesh3dfrom5d(mesh4d, turning_list, split=2):
     for turning in turning_list:
         axis1, axis2, angle = turning
         if angle != 0:
             # mesh4d = scipy.ndimage.rotate(mesh4d, angle, axes=(axis1, axis2), reshape=False)
-            mesh4d = myRotate(mesh4d, angle, axes=(axis1, axis2))
+            mesh4d = myRotate(mesh4d, angle, axes=(axis1, axis2), divide=split)
     mesh3d = np.max(mesh4d, axis=(0, 1))
     return mesh3d
 
@@ -194,11 +193,22 @@ def concatFrames2Gif(*frames_list, path):
     )
 
 
-def getTransferingSettingList3D(inverse=False):
+def getTransferingSettingList3D(type = 0):
     setting_list = []
     setting_list.append([(0, 2, 0), (1, 3, 0)])
-    for ang in range(0, 90, 10):
-        setting_list.append([(0, 2, ang), (1, 3, ang)])
+    if type == 0:
+        for ang in range(0, 90, 5):
+            setting_list.append([(0, 2, ang), (1, 3, ang)])
+    elif type == 1:
+        for ang in range(0, 90, 10):
+            setting_list.append([(0, 2, ang), (1, 3, 0)])
+        for ang in range(0, 90, 10):
+            setting_list.append([(0, 2, 90), (1, 3, ang)])
+    elif type == 2:
+        for ang in range(0, 90, 10):
+            setting_list.append([(0, 2, 0), (1, 3, ang)])
+        for ang in range(0, 90, 10):
+            setting_list.append([(0, 2, ang), (1, 3, 90)])
     setting_list.append([(0, 2, 90), (1, 3, 90)])
     return setting_list
 
@@ -209,7 +219,7 @@ def getSettingList2D45():
         setting_list.append((angle + 45, angle + 45, angle))
     return setting_list
 
-def myRotate(model, angle, axes=(0,1)):
+def myRotateOri(model, angle, axes=(0,1)):
     angle = np.radians(angle)
     matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
     X, Y = np.meshgrid(np.arange(model.shape[axes[1]]), np.arange(model.shape[axes[0]]))
@@ -232,13 +242,62 @@ def myRotate(model, angle, axes=(0,1)):
     result = np.moveaxis(result, (0, 1), axes)
     return result
 
-    
+def myRotate(model, angle, axes=(0,1), divide=2):
+    angle = np.radians(angle)
+    matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    result = np.zeros(model.shape, dtype=model.dtype)
+
+    x_splits = np.split(np.arange(model.shape[axes[1]]), divide)
+    y_splits = np.split(np.arange(model.shape[axes[0]]), divide)
+    for x_range in x_splits:
+        for y_range in y_splits:
+            X, Y = np.meshgrid(x_range, y_range)
+            center_X = X - model.shape[axes[1]] // 2
+            center_Y = Y - model.shape[axes[0]] // 2
+
+            target_axis = np.stack([center_X, center_Y], axis=-1)
+            inverse_axis = np.linalg.inv(matrix)
+            index_axis = target_axis @ inverse_axis
+            index_X, index_Y = index_axis[:, :, 0], index_axis[:, :, 1]
+            index_X = index_X + model.shape[axes[1]] // 2
+            index_Y = index_Y + model.shape[axes[0]] // 2
+            index_X = np.clip(index_X, 0, model.shape[axes[1]] - 1)
+            index_Y = np.clip(index_Y, 0, model.shape[axes[0]] - 1)
+            index_X = index_X.astype(np.int64)
+            index_Y = index_Y.astype(np.int64)
+
+            # shift_model = np.moveaxis(model, axes, (0, 1))
+            if axes == (0, 1):
+                result[Y, X, :, :, :] = model[index_Y, index_X, :, :, :]
+            elif axes == (1, 2):
+                result[:, Y, X, :, :] = model[:, index_Y, index_X, :, :]
+            elif axes == (0, 2):
+                result[Y, :, X, :, :] = model[index_Y, :, index_X, :, :]
+            elif axes == (2, 3):
+                result[:, :, Y, X, :] = model[:, :, index_Y, index_X, :]
+            elif axes == (0, 3):
+                result[Y, :, :, X, :] = model[index_Y, :, :, index_X, :]
+            elif axes == (1, 3):
+                result[:, Y, :, X, :] = model[:, index_Y, :, index_X, :]
+            else:
+                raise ValueError("Invalid axes")
+    return result
 
 
 if __name__ == "__main__":
-    size = 40
-    imgSize = 80
-    postfix = "23"
+
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--imgSize", type=int, default=100)
+    argparser.add_argument("--shape1", type=int, default=0)
+    argparser.add_argument("--shape2", type=int, default=2)
+    argparser.add_argument("--divide", type=int, default=4)
+    
+    args = argparser.parse_args()
+
+    imgSize = args.imgSize
+    size = imgSize // 2
+    divide = args.divide
+    postfix = f"{args.shape1}{args.shape2}_{divide}"
     b_r = int((imgSize - size) / 2)
     shape0 = getShape3d(0, size, imgSize, True, False)
     shape1 = getShape3d(1, size, imgSize, True, False)
@@ -247,10 +306,17 @@ if __name__ == "__main__":
     shape2 = np.transpose(shape2, (1, 2, 0))
     # shape3 = np.transpose(shape3, (1, 2, 0))
 
-    mesh5d = np.zeros((imgSize, imgSize, imgSize, imgSize, imgSize))
+    shapeList = {
+        0: shape0,
+        1: shape1,
+        2: shape2,
+        3: shape3,
+    }
+
+    mesh5d = np.zeros((imgSize, imgSize, imgSize, imgSize, imgSize), dtype=np.uint8)
     mesh5d[b_r : b_r + size, b_r : b_r + size, b_r : b_r + size, b_r : b_r + size, b_r : b_r + size] = 255
-    mesh5d = crop3dfrom5d(mesh5d, shape2, (0, 1))
-    mesh5d = crop3dfrom5d(mesh5d, shape3, (2, 3))
+    mesh5d = crop3dfrom5d(mesh5d, shapeList[args.shape1], (0, 1))
+    mesh5d = crop3dfrom5d(mesh5d, shapeList[args.shape2], (2, 3))
     # mesh4d = crop3dfrom4d(mesh4d, shape2, 2)
     print("Start recording 3D video")
 
@@ -262,10 +328,10 @@ if __name__ == "__main__":
     # record2DVideo(mesh3d3, getSettingList2D(), f"./output/3d_5d/mesh3d3.gif")
     mesh3d1 = getMesh3dfrom5d(mesh5d, [(0, 2, 0), (1, 3, 0)])
     frames1 = record2DVideo(mesh3d1, getSettingList2D45(), f"./output/3d_5d/mesh3d1_{postfix}.gif")
-    mesh3d2 = getMesh3dfrom5d(mesh5d, [(0, 2, 90), (1, 3, 90)])
+    mesh3d2 = getMesh3dfrom5d(mesh5d, [(0, 2, 90), (1, 3, 90)], divide)
     frames2 = record2DVideo(mesh3d2, getSettingList2D45(), f"./output/3d_5d/mesh3d2_{postfix}.gif")
-    mesh3d3 = getMesh3dfrom5d(mesh5d, [(0, 2, 45), (1, 3, 45)])
-    record2DVideo(mesh3d3, getSettingList2D(), f"./output/3d_5d/mesh3d3_{postfix}.gif")
+    # mesh3d3 = getMesh3dfrom5d(mesh5d, [(0, 2, 45), (1, 3, 45)], divide)
+    # record2DVideo(mesh3d3, getSettingList2D(), f"./output/3d_5d/mesh3d3_{postfix}.gif")
 
     frames12 = record3DVideo(
         mesh5d,
@@ -275,9 +341,39 @@ if __name__ == "__main__":
         pitch=45,
         roll=0,
     )
-
     frames21 = frames12[::-1]
+
+    frames12_1 = record3DVideo(
+        mesh5d,
+        getTransferingSettingList3D(type=1),
+        f"./output/3d_5d/3d_shape{postfix}.gif",
+        yaw=45,
+        pitch=45,
+        roll=0,
+    )
+    frames21_1 = frames12_1[::-1]
+
+    frames12_2 = record3DVideo(
+        mesh5d,
+        getTransferingSettingList3D(type=2),
+        f"./output/3d_5d/3d_shape{postfix}.gif",
+        yaw=45,
+        pitch=45,
+        roll=0,
+    )
+    frames21_2 = frames12_2[::-1]
+
 
     concatFrames2Gif(
         frames1, frames12, frames2, frames21, path=f"./output/3d_5d/transferring_{postfix}.gif"
     )
+
+    concatFrames2Gif(
+        frames1, frames12_1, frames2, frames21_1, path=f"./output/3d_5d/transferring1_{postfix}.gif"
+    )
+
+    concatFrames2Gif(
+        frames1, frames12_2, frames2, frames21_2, path=f"./output/3d_5d/transferring2_{postfix}.gif"
+    )
+
+

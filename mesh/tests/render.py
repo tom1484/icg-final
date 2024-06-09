@@ -45,27 +45,32 @@ def render(PRM, RM):
     scene.remove_node(mesh_node)
 
 
-PRM = [(0, 2, 3)]
+PRM = [(0, 1, 3)]
 RM = np.identity(3)
 
-inner_rotate = 2.7
+RM45 = nd_rotation(np.pi / 4, 3, 0, 1) @ nd_rotation(np.pi / 4, 3, 1, 2)
+
+inner_rotate = np.pi
 
 for t in tqdm(np.linspace(0, inner_rotate, 20)):
-    RM = nd_rotation(t / 2, 3, 0, 2) @ nd_rotation(t, 3, 1, 2)
+    RM = nd_rotation(t / 2, 3, 0, 2) @ nd_rotation(t, 3, 1, 2) @ RM45
     render(PRM, RM)
 
 # RM = np.identity(3)
 for t in tqdm(np.linspace(0, np.pi / 2, 20)):
-    PRM = [(t, 2, 3)]
+    PRM = [(t, 1, 3)]
     render(PRM, RM)
 
 for t in tqdm(np.linspace(inner_rotate, 0, 20)):
-    RM = nd_rotation(t / 2, 3, 0, 2) @ nd_rotation(t, 3, 1, 2)
+    RM = nd_rotation(t / 2, 3, 0, 2) @ nd_rotation(t, 3, 1, 2) @ RM45
     render(PRM, RM)
 
+for t in tqdm(np.linspace(np.pi / 2, 0, 20)):
+    PRM = [(t, 1, 3)]
+    render(PRM, RM)
 
 renders[0].save(
-    "mesh/result/sculpt_4D.gif",
+    "mesh/result/sculpt_4D_45.gif",
     save_all=True,
     append_images=renders[1:],
     loop=0,
