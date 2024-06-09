@@ -1,5 +1,5 @@
+import sys
 import pickle
-
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
@@ -439,8 +439,10 @@ sculpt_3D = sculpt.project_3d_from_4d(
     ]
 )
 
-sculpt_3D.reorder_faces()
-sculpt_3D.to_wavefront("mesh/result/sculpt_3D.obj")
+# sculpt_3D.reorder_faces()
+# sculpt_3D.to_wavefront(export_name)
+# print(export_name)
 
-with open("mesh/result/sculpt_4D.pkl", "wb") as f:
+export_name = sys.argv[1]
+with open(export_name, "wb") as f:
     pickle.dump(sculpt, f)

@@ -1,16 +1,17 @@
 import pickle
+import sys
 
 import numpy as np
 import pyrender
 import trimesh
-from matplotlib import pyplot as plt
-from tqdm import tqdm
 from PIL import Image
+from tqdm import tqdm
 
 from ..mesh import Mesh
 from ..space import nd_rotation
 
-sculpt: Mesh = pickle.load(open("mesh/result/sculpt_4D.pkl", "rb"))
+import_name = sys.argv[1]
+sculpt: Mesh = pickle.load(open(import_name, "rb"))
 
 
 # render scene
@@ -69,8 +70,9 @@ for t in tqdm(np.linspace(np.pi / 2, 0, 20)):
     PRM = [(t, 1, 3)]
     render(PRM, RM)
 
+export_name = sys.argv[2]
 renders[0].save(
-    "mesh/result/sculpt_4D_45.gif",
+    export_name,
     save_all=True,
     append_images=renders[1:],
     loop=0,
