@@ -1,0 +1,13 @@
+MeshPy
+pybind11
+pyglet
+pyrender
+pytest
+PyWavefront
+trimesh
+triangle
+tqdm
+pillow
+matplotlib
+scipy
+numpy

@@ -1,18 +1,15 @@
-import time
+import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 from scipy import linalg as la
 
-from mesh.utils import reorder_triangles_by_norm
-
 from ..config import TOL
 from ..convex import edges_from_2D_convex, polyhedron_from_halfspaces
 from ..mesh import Mesh
-from ..plot import plot_3D_mesh, plot_3D_polygon
 from ..space import KSimplexSpace, nd_rotation
-from ..split_4D import plot_2D_polygon, split_4D_hyperface
+from ..split_4D import split_4D_hyperface
 from ..triangle import triangulate
 
 
@@ -83,9 +80,6 @@ def init_sculpt():
 def get_sculpt_tetrahedron(sculpt, index):
     tetrahedrons_id = sculpt["tetrahedrons_id"]
     return sculpt["vertices"][tetrahedrons_id[index]].T
-
-
-sculpt = init_sculpt()
 
 
 def generate_cuts(mesh: Mesh, RM: np.ndarray, axis):
@@ -238,9 +232,6 @@ mesh1 = Mesh(
 # RM = nd_rotation(0.3, 3, 0, 2)
 RM = np.identity(3)
 
-cuts0 = generate_cuts(mesh0, RM, 3)
-cuts1 = generate_cuts(mesh1, RM, 2)
-
 # Display
 fig = plt.figure()
 ax = plt.axes(projection="3d")
@@ -259,8 +250,7 @@ def project_norm_to_hyperface(norm: np.ndarray, hyperface: np.ndarray):
     return proj / np.linalg.norm(proj)
 
 
-def perform_cut(cuts, sculpt, debug=False) -> Mesh:
-    # hole's (boundary points, edges, edge directions)
+def perform_cut(cuts, sculpt) -> Mesh:
     sculpt_face_holes = [[[], [], []] for _ in range(sculpt.num_faces)]
     cuts_face_holes = [[[], [], []] for _ in range(cuts.num_faces)]
 
@@ -287,11 +277,6 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
             pb = pb[~redundant]
 
             intersections_p, edges = polyhedron_from_halfspaces(pA, pb)
-            # if cut_idx == 0 and sculpt_idx == 1:
-            #     # print(sculpt_idx)
-            #     # print(np.hstack((pA, pb)))
-            #     # print(redundant)
-            #     pass
 
             if intersections_p.T.shape[0] > 1:
                 # Non-paralell case
@@ -305,29 +290,25 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
                     _, edges = triangulate(intersections_p, np.array(edges))
                     intersections = (Si.O + Si.V @ intersections_p.T).T
 
-                    # if cut_idx == 2:
-                    #     print(intersections_p)
-                    #     print(edges)
-
                     cut_norm = cuts.face_normals[cut_idx]
                     sculpt_norm = sculpt.face_normals[sculpt_idx]
 
-                    norm_sculpt_on_cut = -project_norm_to_hyperface(sculpt_norm, cut_norm)
-                    norm_cut_on_sculpt = -project_norm_to_hyperface(cut_norm, sculpt_norm)
+                    norm_sculpt_on_cut = -project_norm_to_hyperface(
+                        sculpt_norm, cut_norm
+                    )
+                    norm_cut_on_sculpt = -project_norm_to_hyperface(
+                        cut_norm, sculpt_norm
+                    )
 
                     # Add vertices to holes on faces
                     cuts_faces_hole = cuts_face_holes[cut_idx]
                     cuts_faces_hole[1].extend(edges + len(cuts_faces_hole[0]))
-                    # cuts_faces_hole[1].append(edges + len(cuts_faces_hole[0]))
                     cuts_faces_hole[0].extend(intersections)
                     cuts_faces_hole[2].extend(
                         np.repeat(
                             norm_sculpt_on_cut.reshape((1, 4)), len(edges), axis=0
                         )
                     )
-                    # cuts_faces_hole[2].append(
-                    #     -project_norm_to_hyperface(sculpt_norm, cut_norm)
-                    # )
 
                     sculpt_faces_hole = sculpt_face_holes[sculpt_idx]
                     sculpt_faces_hole[1].extend(edges + len(sculpt_faces_hole[0]))
@@ -341,9 +322,7 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
                 # Paralell case
                 else:
                     continue
-                    # if cut_idx == 0:
-                    #     print(intersections_p)
-                    #     print(edges)
+
                     sculpt_norm = sculpt.face_normals[sculpt_idx]
 
                     sculpt_faces_hole = sculpt_face_holes[sculpt_idx]
@@ -387,8 +366,6 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
                             np.repeat(norm.reshape((1, 4)), len(edges), axis=0)
                         )
 
-    # return sculpt
-
     all_vertices = np.vstack((sculpt.vertices, cuts.vertices))
     sculpt_hyperfaces = sculpt.hyperfaces
     cuts_hyperfaces = cuts.hyperfaces + sculpt.num_verts
@@ -396,47 +373,13 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
     new_hyperfaces = np.empty((0, 4), dtype=np.int32)
     new_normals = np.empty((0, 4), dtype=np.float64)
 
-    # for i in range(cuts.num_faces):
     for i in tqdm.tqdm(range(cuts.num_faces)):
-        # break
-        # TODO: Simplify hole
-        # vertices = cuts_face_holes[i][0]
-        # faces = cuts_face_holes[i][1]
-        # normals = cuts_face_holes[i][2]
-        #
-        # groups = []
-        # group_normals = []
-        # group_count = 0
-        # face_groups = [-1 for _ in range(len(faces))]
-        # for j, normal in enumerate(normals):
-        #     found = False
-        #     for k, group_normal in enumerate(group_normals):
-        #         if np.all(np.abs(normal - group_normal) < TOL):
-        #             groups[k].append(faces[j])
-        #             face_groups[j] = k
-        #             found = True
-        #             break
-        #     if not found:
-        #         groups.append([faces[j]])
-        #         group_normals.append(normal)
-        #         face_groups[j] = group_count
-        #         group_count += 1
-        #
-        # for group in groups:
-        #     group = np.vstack(group)
-        #     group = np.sort(group, axis=1)
-        #     group = np.unique(group, axis=0)
-
         h_vertices = np.array(cuts_face_holes[i][0])
         h_faces = np.array(cuts_face_holes[i][1])
         h_normals = np.array(cuts_face_holes[i][2])
 
         if h_vertices.shape[0] == 0:
             continue
-
-        # print(h_vertices)
-        # print(h_faces)
-        # print(h_normals)
 
         hyperface = cuts_hyperfaces[i]
         new_verts, new_hfs = split_4D_hyperface(
@@ -454,22 +397,13 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
             )
         )
 
-        # break
-
     for i in tqdm.tqdm(range(sculpt.num_faces)):
-        # break
-        # for i in range(sculpt.num_faces):
-        # if i != 11:
-        #     continue
-
         h_vertices = np.array(sculpt_face_holes[i][0])
         h_faces = np.array(sculpt_face_holes[i][1])
         h_normals = np.array(sculpt_face_holes[i][2])
 
         if h_vertices.shape[0] == 0:
             continue
-
-        # print(i)
 
         hyperface = sculpt_hyperfaces[i]
         new_verts, new_hfs = split_4D_hyperface(
@@ -487,24 +421,13 @@ def perform_cut(cuts, sculpt, debug=False) -> Mesh:
             )
         )
 
-        # test_mesh = Mesh(all_vertices, new_hyperfaces, new_normals)
-        # test_mesh_3D = test_mesh.project_3d_from_4d([])
-        # plot_3D_mesh(ax, test_mesh_3D, plot_normal=False)
-        # plt.pause(2)
-
     return Mesh(all_vertices, new_hyperfaces, new_normals)
 
 
-# plt.ion()
-# plt.show()
+sculpt = init_sculpt()
+cuts = generate_cuts(mesh1, RM, 2)
 
-sculpt = perform_cut(cuts1, sculpt, debug=True)
-# sculpt1 = perform_cut(cuts1, sculpt0, debug=True)
-# sculpt = perform_cut(cuts1, cuts0, debug=True)
-
-# sculpt_3D = sculpt0.project_3d_from_4d(
-
-# s = time.time()
+sculpt = perform_cut(cuts, sculpt)
 sculpt_3D = sculpt.project_3d_from_4d(
     [
         # (np.pi / 4, 0, 3),
@@ -515,16 +438,9 @@ sculpt_3D = sculpt.project_3d_from_4d(
         (np.pi / 2, 1, 2),
     ]
 )
-# print(time.time() - s)
+
 sculpt_3D.reorder_faces()
-sculpt_3D.to_wavefront("mesh/result/sculpt_4D.obj")
-
-# print(sculpt_3D.hyperfaces)
-# print(sculpt_3D.face_normals)
-# plot_3D_mesh(ax, sculpt_3D, plot_normal=False)
-# plt.show()
-
-import pickle
+sculpt_3D.to_wavefront("mesh/result/sculpt_3D.obj")
 
 with open("mesh/result/sculpt_4D.pkl", "wb") as f:
     pickle.dump(sculpt, f)
